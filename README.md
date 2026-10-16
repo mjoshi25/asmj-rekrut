@@ -79,3 +79,13 @@ Do not commit real database credentials. The `test` profile excludes JDBC auto-c
 
 ## Docker
 The project includes a root-level `Dockerfile`. Build with `docker build -t asmj-recruitment .` and run with `docker run --rm -p 8080:8080 asmj-recruitment`. The demo user manager is in-memory, so newly registered login credentials do not survive a restart; use a persistent account repository before production.
+
+
+## Role-aware selection dropdowns (latest update)
+
+- Recruiters and administrators select an approved employer from a dropdown when posting a job. The published job stores the employer ID, company name and employer email so it remains linked to the selected company.
+- Employer accounts only see and post jobs for their own approved employer record.
+- Candidate registration uses dropdowns for qualification and experience bands. Employer registration uses an industry dropdown; recruiter registration uses recruitment-experience and hiring-sector dropdowns.
+- Interview scheduling selects an existing candidate and an open job. Candidate email and job/company details are copied from the selected records rather than retyped.
+- Placement recording selects an existing candidate, employer and job, keeping the saved details consistent.
+- If there are no approved employers, job posting remains disabled until an administrator adds or approves an employer.
