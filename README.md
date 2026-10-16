@@ -112,3 +112,9 @@ Authorization records are stored through the configured `RecordStore` adapter, s
 - Admins can configure a fixed or salary-percentage commission at `/admin/commission`. Changing an application to `SELECTED` or `HIRED` creates a commission ledger entry; a numeric salary is required for percentage calculations. The ledger tracks PENDING, INVOICED, PAID and WAIVED and does not collect or transfer money.
 - The admin relationship audit at `/admin/relationships` shows application and placement links between candidate, employer, recruiter and job.
 - MongoDB Atlas is used with the `test` or `prod` profile via `MONGODB_URI`; the `dev` profile uses local H2. Login accounts are stored through the same record adapter, so production accounts persist when `SPRING_PROFILES_ACTIVE=prod` and MongoDB is configured. Development H2 data resets when the app restarts. Demo credentials are for development only and must be changed before production.
+
+## Candidate profile photo and account settings
+
+- Signed-in candidates can upload or replace a profile photo from **My profile**. Photos are uploaded to Cloudinary and the resulting `photoUrl` is stored with the candidate profile record; configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the deployment environment.
+- The candidate profile and generated resume use map-safe Thymeleaf access for optional profile fields, including `photoUrl`, so absent optional values do not cause a template property-resolution error.
+- All authenticated roles have a **Settings** navigation link. The settings page displays the signed-in account and roles and supports password changes after verifying the current password. New passwords must be at least eight characters and match confirmation.

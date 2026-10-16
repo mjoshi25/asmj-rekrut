@@ -32,6 +32,7 @@ public class SecurityConfig {
         .requestMatchers("/", "/jobs", "/opportunity/*", "/jobs/*/apply", "/register/**", "/login", "/css/**", "/js/**", "/images/**", "/h2-console/**", "/error").permitAll()
         .requestMatchers("/admin/**", "/reports/**").hasRole("ADMIN")
         .requestMatchers("/candidate/profile/**", "/candidate/profile").hasRole("CANDIDATE")
+        .requestMatchers("/settings/**").authenticated()
         .requestMatchers("/candidate-search").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER")
         .requestMatchers("/candidates/*/resume").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER", "CANDIDATE")
         .requestMatchers("/recruiter/**").hasRole("RECRUITER")
