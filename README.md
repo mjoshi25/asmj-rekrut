@@ -45,7 +45,10 @@ Do not commit real database credentials. The `test` profile excludes JDBC auto-c
 ## Implemented screens
 - Public landing page and searchable job board
 - Job detail and public application submission
-- Candidate registration
+- Candidate registration with login account creation
+- Public employer registration with admin approval workflow
+- Public recruiter registration with admin approval workflow
+- Admin review screen at `/admin/registrations`
 - Sign-in / sign-out
 - Dashboard and workflow quick links
 - Candidate and employer directories
@@ -57,7 +60,20 @@ Do not commit real database credentials. The `test` profile excludes JDBC auto-c
 - Candidate portal application view
 
 ## Current MVP boundaries / recommended next hardening
-- Candidate registration and public job applications are functional, but the initial demo authentication accounts are intentionally seeded in Spring Security memory; self-registration does not yet create a login credential or link the candidate record to an authenticated account.
-- Resume upload, email verification, password reset, employer self-service registration, candidate profile editing, and full CRUD/audit screens should be added in the next iteration.
+- The current build creates candidate, employer and recruiter login accounts through Spring Security in-memory user management. These accounts reset when the application restarts, so implement a database-backed user repository before production.
+- Employer and recruiter accounts remain restricted to pending roles until an administrator approves them.
+- Resume upload, email verification, password reset, candidate profile editing, full CRUD/audit screens, and persistent user credential storage are not yet implemented.
 - Replace demo credentials and use HTTPS, secure secret management, rate limiting, and an appropriate privacy/retention policy before production.
-- The persistence adapter stores typed records as JSON payloads in H2/MongoDB; this enables environment switching for the MVP, but a production system may benefit from typed schema collections and migration/versioning.
+- The persistence adapter stores business records as JSON payloads in H2/MongoDB; this enables environment switching for the MVP, but production may benefit from typed schema collections and migration/versioning.
+
+
+## Registration flows
+- Candidate: `/register/candidate` creates a candidate profile and login immediately.
+- Employer: `/register/employer` stores a pending application; admin approves at `/admin/registrations`.
+- Recruiter: `/register/recruiter` stores a pending application; admin approves at `/admin/registrations`.
+- Default development admin: `admin@asmj.co.in` / `Admin@123`. Change this before any shared deployment.
+- All POST forms use Thymeleaf `th:action` to allow Spring Security CSRF tokens to be included.
+
+
+## Docker
+The project includes a root-level `Dockerfile`. Build with `docker build -t asmj-recruitment .` and run with `docker run --rm -p 8080:8080 asmj-recruitment`. The demo user manager is in-memory, so newly registered login credentials do not survive a restart; use a persistent account repository before production.

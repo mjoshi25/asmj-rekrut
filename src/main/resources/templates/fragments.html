@@ -1,5 +1,5 @@
 <!DOCTYPE html><html xmlns:th="http://www.thymeleaf.org"><body>
-<header th:fragment="nav" class="topbar"><a class="brand" href="/"><span class="brand-mark">A</span><span>ASMJ <b>Recruitment</b><small>Connecting talent to opportunity</small></span></a><nav><a href="/jobs">Find jobs</a><a href="/register/candidate">For candidates</a><a href="/dashboard">Dashboard</a><a href="/login" class="nav-login">Sign in</a></nav></header>
+<header th:fragment="nav" class="topbar"><a class="brand" href="/"><span class="brand-mark">A</span><span>ASMJ <b>Recruitment</b><small>Connecting talent to opportunity</small></span></a><nav><a href="/jobs">Find jobs</a><a href="/register/candidate">Candidates</a><a href="/register/employer">Employers</a><a href="/register/recruiter">Recruiters</a><a href="/dashboard">Dashboard</a><a href="/login" class="nav-login">Sign in</a></nav></header>
 <div th:fragment="flash" th:if="${success}" class="alert" th:text="${success}"></div>
 <footer th:fragment="footer" class="footer"><span>© 2026 ASMJ Recruitment</span><span>People first. Careers forward.</span></footer>
 </body></html>
