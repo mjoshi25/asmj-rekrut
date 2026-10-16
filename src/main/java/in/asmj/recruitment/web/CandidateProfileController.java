@@ -46,7 +46,18 @@ public class CandidateProfileController {
     Map<String,Object> existing = profileForEmail(auth.getName());
     Map<String,Object> profile = existing == null ? new LinkedHashMap<>() : new LinkedHashMap<>(existing);
     String id = existing == null ? UUID.randomUUID().toString().substring(0,8).toUpperCase() : String.valueOf(existing.get("id"));
-    form.forEach((k,v) -> { if (!Set.of("password","confirmPassword","_csrf").contains(k)) profile.put(k, v == null ? "" : v.trim()); });
+    form.forEach((k,v) -> { if (!Set.of("password","confirmPassword","_csrf","educationDetailsJson","projectDetailsJson","technologyExperienceJson","languagesKnownJson").contains(k)) profile.put(k, v == null ? "" : v.trim()); });
+    try {
+      com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+      com.fasterxml.jackson.core.type.TypeReference<List<Map<String,Object>>> listType = new com.fasterxml.jackson.core.type.TypeReference<>() {};
+      profile.put("educationDetails", parseRows(mapper, listType, form.get("educationDetailsJson")));
+      profile.put("projectDetails", parseRows(mapper, listType, form.get("projectDetailsJson")));
+      profile.put("technologyExperience", parseRows(mapper, listType, form.get("technologyExperienceJson")));
+      profile.put("languagesKnown", parseRows(mapper, listType, form.get("languagesKnownJson")));
+    } catch (Exception ex) {
+      ra.addFlashAttribute("error", "Some repeated profile details could not be read. Please review the entries and save again.");
+      return "redirect:/candidate/profile";
+    }
     profile.put("id",id); profile.put("email",auth.getName().trim().toLowerCase(Locale.ROOT));
     profile.put("status", profile.getOrDefault("status","ACTIVE")); profile.put("profileUpdatedAt", java.time.LocalDate.now().toString());
     if (photo != null && !photo.isEmpty()) {
@@ -78,7 +89,7 @@ public class CandidateProfileController {
       Map<String,Object> profile=existing==null?new LinkedHashMap<>():new LinkedHashMap<>(existing);
       String id=existing==null?UUID.randomUUID().toString().substring(0,8).toUpperCase():String.valueOf(existing.get("id"));
       Map<String,String> mapping=Map.ofEntries(
-        Map.entry("fullname","fullName"),Map.entry("name","fullName"),Map.entry("email","email"),Map.entry("mobile","mobile"),Map.entry("mobilenumber","mobile"),Map.entry("alternatemobile","alternateMobile"),Map.entry("alternatephone","alternateMobile"),Map.entry("location","location"),Map.entry("city","city"),Map.entry("state","state"),Map.entry("pincode","pinCode"),Map.entry("highestqualification","qualification"),Map.entry("qualification","qualification"),Map.entry("experienceyears","experienceYears"),Map.entry("experience","experienceYears"),Map.entry("currentrole","currentRole"),Map.entry("desiredrole","desiredRole"),Map.entry("skills","skills"),Map.entry("summary","summary"),Map.entry("linkedinurl","linkedinUrl"),Map.entry("portfoliourl","portfolioUrl"),Map.entry("education","education"),Map.entry("workexperience","workExperience"),Map.entry("certifications","certifications"),Map.entry("languages","languages"));
+        Map.entry("fullname","fullName"),Map.entry("name","fullName"),Map.entry("email","email"),Map.entry("mobile","mobile"),Map.entry("mobilenumber","mobile"),Map.entry("alternatemobile","alternateMobile"),Map.entry("alternatephone","alternateMobile"),Map.entry("location","location"),Map.entry("currentaddress","currentAddress"),Map.entry("hobbies","hobbies"),Map.entry("city","city"),Map.entry("state","state"),Map.entry("pincode","pinCode"),Map.entry("highestqualification","qualification"),Map.entry("qualification","qualification"),Map.entry("experienceyears","experienceYears"),Map.entry("experience","experienceYears"),Map.entry("currentrole","currentRole"),Map.entry("desiredrole","desiredRole"),Map.entry("skills","skills"),Map.entry("summary","summary"),Map.entry("linkedinurl","linkedinUrl"),Map.entry("portfoliourl","portfolioUrl"),Map.entry("education","education"),Map.entry("workexperience","workExperience"),Map.entry("certifications","certifications"),Map.entry("languages","languages"));
       for (var e:values.entrySet()) { String target=mapping.get(e.getKey()); if(target!=null && !target.equals("email") && !e.getValue().isBlank()) profile.put(target,e.getValue()); }
       profile.put("id",id); profile.put("email",auth.getName().trim().toLowerCase(Locale.ROOT)); profile.put("status",profile.getOrDefault("status","ACTIVE")); profile.put("profileUpdatedAt",java.time.LocalDate.now().toString());
       store.save("candidate",id,profile);
@@ -124,6 +135,12 @@ public class CandidateProfileController {
     if(auth==null)return false;
     boolean allowed=auth.getAuthorities().stream().anyMatch(a->Set.of("ROLE_ADMIN","ROLE_EMPLOYER","ROLE_RECRUITER").contains(a.getAuthority()));
     return allowed || auth.getName().equalsIgnoreCase(String.valueOf(c.get("email")));
+  }
+  private List<Map<String,Object>> parseRows(com.fasterxml.jackson.databind.ObjectMapper mapper,
+      com.fasterxml.jackson.core.type.TypeReference<List<Map<String,Object>>> type, String json) throws Exception {
+    if (json == null || json.isBlank()) return new ArrayList<>();
+    List<Map<String,Object>> rows = mapper.readValue(json, type);
+    return rows == null ? new ArrayList<>() : rows.stream().filter(r -> r.values().stream().anyMatch(v -> v != null && !String.valueOf(v).isBlank() && !"false".equals(String.valueOf(v)))).toList();
   }
   private Map<String,Object> profileForEmail(String email) { return store.findAll("candidate").stream().filter(c->email.equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(null); }
   private boolean contains(Map<String,Object> m,String k,String q){return String.valueOf(m.getOrDefault(k,"")).toLowerCase(Locale.ROOT).contains(q.toLowerCase(Locale.ROOT));}
