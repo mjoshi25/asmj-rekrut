@@ -6,3 +6,6 @@
 
 .partner-section{background:#f7faf8}.partner-links{max-width:1140px;margin:0 auto;display:flex;gap:12px;flex-wrap:wrap}.review-actions{display:flex;gap:6px;align-items:center}.review-actions form{margin:0}.reject-button{background:#fff0ef;color:#9b3833}
 @media(max-width:560px){.partner-links{flex-direction:column}.partner-links .button{width:100%;text-align:center}.review-actions{flex-direction:column;align-items:stretch}}
+
+/* Auth-aware navigation */
+.nav-logout{display:inline-flex;margin:0}.nav-logout-button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:8px 10px}.nav-user{font-size:.88rem;color:var(--muted,#64748b);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

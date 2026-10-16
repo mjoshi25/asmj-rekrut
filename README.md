@@ -49,8 +49,10 @@ Do not commit real database credentials. The `test` profile excludes JDBC auto-c
 - Public employer registration with admin approval workflow
 - Public recruiter registration with admin approval workflow
 - Admin review screen at `/admin/registrations`
-- Sign-in / sign-out
-- Dashboard and workflow quick links
+- Sign-in / sign-out with authenticated navigation (Sign in and registration links are hidden after login)
+- Role-based login redirects: admin → `/admin/dashboard`, recruiter → `/recruiter/dashboard`, employer → `/employer/dashboard`, candidate → `/portal`
+- Pending employer/recruiter users are sent to `/pending-approval` until an administrator approves them
+- Separate administrator, recruiter, employer and candidate workspaces
 - Candidate and employer directories
 - Employer creation and job publication
 - Application pipeline and status updates

@@ -26,11 +26,45 @@ public class RecruitmentController {
   @GetMapping("/") public String home(Model m) {
     m.addAttribute("jobs", store.findAll("job").stream().filter(j -> !"CLOSED".equals(j.get("status"))).limit(6).toList()); return "home";
   }
-  @GetMapping("/login") public String login() { return "login"; }
-  @GetMapping("/dashboard") public String dashboard(Model m, Authentication auth) {
+  @GetMapping("/login") public String login(Authentication auth) {
+    if (auth != null && auth.isAuthenticated() && !auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ANONYMOUS"))) {
+      if (hasRole(auth, "ROLE_PENDING_EMPLOYER") || hasRole(auth, "ROLE_PENDING_RECRUITER")) return "redirect:/pending-approval";
+      return "redirect:/dashboard";
+    }
+    return "login";
+  }
+  @GetMapping("/pending-approval") public String pendingApproval(Authentication auth) {
+    if (auth == null || auth.getAuthorities().stream().noneMatch(a -> a.getAuthority().equals("ROLE_PENDING_EMPLOYER") || a.getAuthority().equals("ROLE_PENDING_RECRUITER"))) return "redirect:/dashboard";
+    return "pending-approval";
+  }
+  @GetMapping("/dashboard") public String dashboard(Authentication auth) {
+    // Keep a role-aware fallback for direct visits to /dashboard.
+    if (hasRole(auth, "ROLE_ADMIN")) return "redirect:/admin/dashboard";
+    if (hasRole(auth, "ROLE_RECRUITER")) return "redirect:/recruiter/dashboard";
+    if (hasRole(auth, "ROLE_EMPLOYER")) return "redirect:/employer/dashboard";
+    if (hasRole(auth, "ROLE_CANDIDATE")) return "redirect:/portal";
+    return "redirect:/login";
+  }
+  @GetMapping("/admin/dashboard") public String adminDashboard(Model m, Authentication auth) {
+    populateDashboard(m, auth); m.addAttribute("isAdmin", true); return "dashboard";
+  }
+  @GetMapping("/recruiter/dashboard") public String recruiterDashboard(Model m, Authentication auth) {
+    populateDashboard(m, auth); return "recruiter-dashboard";
+  }
+  @GetMapping("/employer/dashboard") public String employerDashboard(Model m, Authentication auth) {
+    m.addAttribute("name", auth.getName());
+    m.addAttribute("jobs", store.findAll("job").stream().filter(j -> auth.getName().equalsIgnoreCase(String.valueOf(j.get("employerEmail"))) || auth.getName().equalsIgnoreCase(String.valueOf(j.get("email")))).toList());
+    m.addAttribute("jobCount", store.count("job"));
+    m.addAttribute("applicationCount", store.count("application"));
+    return "employer-dashboard";
+  }
+  private void populateDashboard(Model m, Authentication auth) {
     m.addAttribute("candidateCount",store.count("candidate")); m.addAttribute("employerCount",store.count("employer"));
     m.addAttribute("jobCount",store.count("job")); m.addAttribute("applicationCount",store.count("application"));
-    m.addAttribute("recentJobs",store.findAll("job").stream().limit(5).toList()); m.addAttribute("name",auth.getName()); m.addAttribute("isAdmin",auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"))); return "dashboard";
+    m.addAttribute("recentJobs",store.findAll("job").stream().limit(5).toList()); m.addAttribute("name",auth.getName());
+  }
+  private boolean hasRole(Authentication auth, String role) {
+    return auth != null && auth.getAuthorities().stream().anyMatch(a -> role.equals(a.getAuthority()));
   }
   @GetMapping("/jobs") public String jobs(@RequestParam(required=false) String q, Model m) {
     List<Map<String,Object>> all = store.findAll("job").stream().filter(j -> !"CLOSED".equals(j.get("status"))).toList();

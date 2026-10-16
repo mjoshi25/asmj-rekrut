@@ -25,11 +25,21 @@ public class SecurityConfig {
     return http.authorizeHttpRequests(a -> a
         .requestMatchers("/", "/jobs", "/opportunity/*", "/jobs/*/apply", "/register/**", "/login", "/css/**", "/js/**", "/images/**", "/h2-console/**", "/error").permitAll()
         .requestMatchers("/admin/**", "/reports/**").hasRole("ADMIN")
+        .requestMatchers("/recruiter/**").hasRole("RECRUITER")
+        .requestMatchers("/employer/dashboard").hasRole("EMPLOYER")
         .requestMatchers("/candidates/**").hasAnyRole("ADMIN", "RECRUITER")
         .requestMatchers("/employers/**", "/jobs/new", "/jobs/save", "/applications/**", "/interviews/**", "/placements/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER")
         .requestMatchers("/portal/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER", "CANDIDATE")
         .anyRequest().authenticated())
-      .formLogin(f -> f.loginPage("/login").defaultSuccessUrl("/dashboard", true).permitAll())
+      .formLogin(f -> f.loginPage("/login").successHandler((request, response, authentication) -> {
+          boolean admin = authentication.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+          boolean recruiter = authentication.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_RECRUITER"));
+          boolean employer = authentication.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_EMPLOYER"));
+          boolean candidate = authentication.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_CANDIDATE"));
+          boolean pending = authentication.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_PENDING_EMPLOYER") || a.getAuthority().equals("ROLE_PENDING_RECRUITER"));
+          String target = pending ? "/pending-approval" : admin ? "/admin/dashboard" : recruiter ? "/recruiter/dashboard" : employer ? "/employer/dashboard" : candidate ? "/portal" : "/dashboard";
+          response.sendRedirect(request.getContextPath() + target);
+        }).permitAll())
       .logout(l -> l.logoutSuccessUrl("/").permitAll())
       .csrf(c -> c.ignoringRequestMatchers("/h2-console/**"))
       .headers(h -> h.frameOptions(f -> f.sameOrigin())).build();
