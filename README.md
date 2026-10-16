@@ -102,3 +102,13 @@ The project includes a root-level `Dockerfile`. Build with `docker build -t asmj
 7. The employer can revoke authorization at any time. A revoked recruiter cannot create new jobs for that employer.
 
 Authorization records are stored through the configured `RecordStore` adapter, so they persist with the selected H2 or MongoDB backend.
+
+
+## Candidate profiles, resume generation, Excel and commissions
+
+- Candidates can open `/candidate/profile`, edit their profile, upload a photo, and import an Excel profile. Download the supported workbook at `/candidate/profile/template.xlsx`; use the first row for headers and the second row for the candidate's details. The profile's generated resume at `/candidates/{candidateId}/resume` always reads the latest saved details and can be printed or saved as PDF from the browser.
+- Candidate profile photos use Cloudinary. Configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the deployment environment; never commit these secrets. The upload is limited to 5 MB.
+- Employers, recruiters and administrators can search candidate profiles at `/candidate-search`, using skill, qualification, experience and location filters. Access should be granted only to approved hiring users; resume routes enforce signed-in role access.
+- Admins can configure a fixed or salary-percentage commission at `/admin/commission`. Changing an application to `SELECTED` or `HIRED` creates a commission ledger entry; a numeric salary is required for percentage calculations. The ledger tracks PENDING, INVOICED, PAID and WAIVED and does not collect or transfer money.
+- The admin relationship audit at `/admin/relationships` shows application and placement links between candidate, employer, recruiter and job.
+- MongoDB Atlas is used with the `test` or `prod` profile via `MONGODB_URI`; the `dev` profile uses local H2. Login accounts are stored through the same record adapter, so production accounts persist when `SPRING_PROFILES_ACTIVE=prod` and MongoDB is configured. Development H2 data resets when the app restarts. Demo credentials are for development only and must be changed before production.

@@ -4,7 +4,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.userdetails.User;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.provisioning.UserDetailsManager;
+import in.asmj.recruitment.store.RecordStore;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -13,21 +14,29 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
   @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
 
-  @Bean InMemoryUserDetailsManager users(PasswordEncoder encoder) {
-    return new InMemoryUserDetailsManager(
-      User.withUsername("admin@asmj.co.in").password(encoder.encode("Admin@123")).roles("ADMIN").build(),
-      User.withUsername("recruiter@asmj.co.in").password(encoder.encode("Recruit@123")).roles("RECRUITER").build(),
-      User.withUsername("employer@asmj.co.in").password(encoder.encode("Employer@123")).roles("EMPLOYER").build(),
-      User.withUsername("candidate@asmj.co.in").password(encoder.encode("Candidate@123")).roles("CANDIDATE").build());
+  @Bean UserDetailsManager users(PasswordEncoder encoder, RecordStore store) {
+    PersistentUserDetailsManager manager = new PersistentUserDetailsManager(store, encoder);
+    seed(manager, encoder, "admin@asmj.co.in", "Admin@123", "ADMIN");
+    seed(manager, encoder, "recruiter@asmj.co.in", "Recruit@123", "RECRUITER");
+    seed(manager, encoder, "employer@asmj.co.in", "Employer@123", "EMPLOYER");
+    seed(manager, encoder, "candidate@asmj.co.in", "Candidate@123", "CANDIDATE");
+    return manager;
+  }
+
+  private void seed(UserDetailsManager manager, PasswordEncoder encoder, String email, String password, String role) {
+    if (!manager.userExists(email)) manager.createUser(User.withUsername(email).password(encoder.encode(password)).roles(role).build());
   }
 
   @Bean SecurityFilterChain security(HttpSecurity http) throws Exception {
     return http.authorizeHttpRequests(a -> a
         .requestMatchers("/", "/jobs", "/opportunity/*", "/jobs/*/apply", "/register/**", "/login", "/css/**", "/js/**", "/images/**", "/h2-console/**", "/error").permitAll()
         .requestMatchers("/admin/**", "/reports/**").hasRole("ADMIN")
+        .requestMatchers("/candidate/profile/**", "/candidate/profile").hasRole("CANDIDATE")
+        .requestMatchers("/candidate-search").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER")
+        .requestMatchers("/candidates/*/resume").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER", "CANDIDATE")
         .requestMatchers("/recruiter/**").hasRole("RECRUITER")
         .requestMatchers("/employer/dashboard", "/employer/authorizations/**").hasRole("EMPLOYER")
-        .requestMatchers("/candidates/**").hasAnyRole("ADMIN", "RECRUITER")
+        .requestMatchers("/candidates/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER")
         .requestMatchers("/employers/**", "/jobs/new", "/jobs/save", "/applications/**", "/interviews/**", "/placements/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER")
         .requestMatchers("/portal/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER", "CANDIDATE")
         .anyRequest().authenticated())

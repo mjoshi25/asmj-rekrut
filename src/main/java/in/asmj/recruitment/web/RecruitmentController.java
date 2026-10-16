@@ -121,7 +121,12 @@ public class RecruitmentController {
     if (q != null && !q.isBlank()) all = all.stream().filter(j -> String.valueOf(j.get("title")).toLowerCase().contains(q.toLowerCase()) || String.valueOf(j.get("location")).toLowerCase().contains(q.toLowerCase())).toList();
     m.addAttribute("jobs",all); m.addAttribute("q",q==null?"":q); return "jobs";
   }
-  @GetMapping("/opportunity/{id}") public String job(@PathVariable String id, Model m) { m.addAttribute("job",store.find("job",id).orElseThrow()); return "job-detail"; }
+  @GetMapping("/opportunity/{id}") public String job(@PathVariable String id, Model m, Authentication auth) {
+    Map<String,Object> job=store.find("job",id).orElseThrow(); m.addAttribute("job",job);
+    Map<String,Object> candidateProfile=null;
+    if(auth!=null && hasRole(auth,"ROLE_CANDIDATE")) candidateProfile=store.findAll("candidate").stream().filter(c->auth.getName().equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(null);
+    m.addAttribute("candidateProfile",candidateProfile); return "job-detail";
+  }
 
   @GetMapping("/register/candidate") public String candidateRegister(Model m) { m.addAttribute("record",new LinkedHashMap<>()); return "candidate-register"; }
   @PostMapping("/register/candidate") public String saveCandidate(@RequestParam Map<String,String> form, RedirectAttributes ra) {
@@ -225,14 +230,36 @@ public class RecruitmentController {
     r.put("employerId", employerId);
     r.put("company", firstNonBlank(employer.get("companyName"), employer.get("company"), employer.get("name")));
     r.put("employerEmail", employer.get("email"));
-    r.put("id",newId()); r.putIfAbsent("status","OPEN"); r.put("createdAt",LocalDate.now().toString()); r.put("postedBy",auth.getName());
+    r.put("id",newId()); r.putIfAbsent("status","OPEN"); r.put("createdAt",LocalDate.now().toString()); r.put("postedBy",auth.getName()); r.put("postedByRole", hasRole(auth,"ROLE_RECRUITER") ? "RECRUITER" : hasRole(auth,"ROLE_EMPLOYER") ? "EMPLOYER" : "ADMIN"); if(hasRole(auth,"ROLE_RECRUITER")) r.put("recruiterEmail",auth.getName());
     store.save("job",String.valueOf(r.get("id")),r); ra.addFlashAttribute("success","Job opening published and linked to the selected employer."); return "redirect:/jobs";
   }
-  @PostMapping("/jobs/{id}/apply") public String apply(@PathVariable String id, @RequestParam String fullName, @RequestParam String email, @RequestParam(required=false) String phone, RedirectAttributes ra) {
-    Map<String,Object> job=store.find("job",id).orElseThrow(); String appId=newId(); Map<String,Object> a=new LinkedHashMap<>(); a.put("id",appId); a.put("jobId",id); a.put("jobTitle",job.get("title")); a.put("fullName",fullName); a.put("email",normalizedEmail(email)); a.put("phone",phone); a.put("status","APPLIED"); a.put("appliedAt",LocalDate.now().toString()); store.save("application",appId,a); ra.addFlashAttribute("success","Application submitted. Reference: "+appId); return "redirect:/opportunity/"+id;
+  @PostMapping("/jobs/{id}/apply") public String apply(@PathVariable String id, @RequestParam String fullName, @RequestParam String email, @RequestParam(required=false) String phone, @RequestParam(required=false) String alternateMobile, Authentication auth, RedirectAttributes ra) {
+    Map<String,Object> job=store.find("job",id).orElseThrow(); String normalized=normalizedEmail(email);
+    String lookupEmail=normalized; Map<String,Object> candidate=store.findAll("candidate").stream().filter(c->lookupEmail.equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(null);
+    if(auth!=null && hasRole(auth,"ROLE_CANDIDATE")) {
+      normalized=normalizedEmail(auth.getName()); String signedInEmail=normalized;
+      candidate=store.findAll("candidate").stream().filter(c->signedInEmail.equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(candidate);
+      if(candidate!=null){fullName=String.valueOf(candidate.getOrDefault("fullName",fullName));phone=String.valueOf(candidate.getOrDefault("mobile",candidate.getOrDefault("phone",phone==null?"":phone)));alternateMobile=String.valueOf(candidate.getOrDefault("alternateMobile",alternateMobile==null?"":alternateMobile));}
+    }
+    String appId=newId(); Map<String,Object> a=new LinkedHashMap<>(); a.put("id",appId); a.put("jobId",id); a.put("jobTitle",job.get("title")); a.put("company",job.get("company")); a.put("employerId",job.get("employerId")); a.put("employerEmail",job.get("employerEmail")); a.put("recruiterEmail",job.getOrDefault("recruiterEmail","")); a.put("candidateId",candidate==null?"":candidate.get("id")); a.put("fullName",fullName); a.put("email",normalized); a.put("phone",phone); a.put("alternateMobile",alternateMobile); a.put("status","APPLIED"); a.put("appliedAt",LocalDate.now().toString()); store.save("application",appId,a); ra.addFlashAttribute("success","Application submitted. Reference: "+appId); return "redirect:/opportunity/"+id;
   }
   @GetMapping("/applications") public String applications(Model m) { m.addAttribute("records",store.findAll("application")); return "applications"; }
-  @PostMapping("/applications/{id}/status") public String applicationStatus(@PathVariable String id,@RequestParam String status,RedirectAttributes ra) { Map<String,Object> a=store.find("application",id).orElseThrow(); a.put("status",status); store.save("application",id,a); ra.addFlashAttribute("success","Application status updated."); return "redirect:/applications"; }
+  @PostMapping("/applications/{id}/status") public String applicationStatus(@PathVariable String id,@RequestParam String status,RedirectAttributes ra) {
+    if(!Set.of("APPLIED","SHORTLISTED","INTERVIEW","OFFERED","SELECTED","HIRED","REJECTED").contains(status)){ra.addFlashAttribute("error","Invalid application status.");return "redirect:/applications";}
+    Map<String,Object> a=store.find("application",id).orElseThrow(); a.put("status",status); a.put("statusUpdatedAt",LocalDate.now().toString()); store.save("application",id,a);
+    if(Set.of("SELECTED","HIRED").contains(status)) createCommissionIfMissing(a);
+    ra.addFlashAttribute("success",Set.of("SELECTED","HIRED").contains(status)?"Candidate status updated. A commission record has been created or confirmed.":"Application status updated."); return "redirect:/applications";
+  }
+  private void createCommissionIfMissing(Map<String,Object> application) {
+    boolean exists=store.findAll("commission").stream().anyMatch(c->String.valueOf(application.get("id")).equals(String.valueOf(c.get("applicationId")))); if(exists)return;
+    Map<String,Object> job=store.find("job",String.valueOf(application.get("jobId"))).orElse(new LinkedHashMap<>());
+    Map<String,Object> cfg=store.find("settings","commission").orElse(Map.of("type","PERCENT","value",8));
+    String type=String.valueOf(cfg.getOrDefault("type","PERCENT")); double value=parseNumber(cfg.get("value")); double salary=parseSalary(job.get("salary"));
+    double amount="FIXED".equals(type)?value:Math.round((salary*value/100.0)*100.0)/100.0;
+    String id=newId(); Map<String,Object> c=new LinkedHashMap<>(); c.put("id",id); c.put("applicationId",application.get("id")); c.put("candidateId",application.getOrDefault("candidateId","")); c.put("candidateName",application.get("fullName")); c.put("candidateEmail",application.get("email")); c.put("jobId",application.get("jobId")); c.put("jobTitle",application.get("jobTitle")); c.put("employerId",application.getOrDefault("employerId",job.get("employerId"))); c.put("company",application.getOrDefault("company",job.get("company"))); c.put("employerEmail",application.getOrDefault("employerEmail",job.get("employerEmail"))); c.put("recruiterEmail",application.getOrDefault("recruiterEmail",job.getOrDefault("recruiterEmail",""))); c.put("modelType",type); c.put("modelValue",value); c.put("salaryBase",salary); c.put("amount",amount); c.put("currency","INR"); c.put("paymentStatus","PENDING"); c.put("calculationStatus",("PERCENT".equals(type)&&salary<=0)?"NEEDS_SALARY":"CALCULATED"); c.put("createdAt",LocalDate.now().toString()); store.save("commission",id,c);
+  }
+  private double parseNumber(Object v){if(v==null)return 0;String s=String.valueOf(v).replaceAll("[^0-9.]","");try{return s.isBlank()?0:Double.parseDouble(s);}catch(Exception e){return 0;}}
+  private double parseSalary(Object v){if(v==null)return 0;String raw=String.valueOf(v).toLowerCase(Locale.ROOT);java.util.regex.Matcher m=java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)").matcher(raw);if(!m.find())return 0;double n;try{n=Double.parseDouble(m.group(1));}catch(Exception e){return 0;}if(raw.contains("lpa")||raw.contains("lakh"))return n*100000d;if(raw.contains("crore")||raw.matches(".*\\bcr\\b.*"))return n*10000000d;return n;}
   @GetMapping("/interviews") public String interviews(Model m) {
     m.addAttribute("records",store.findAll("interview"));
     m.addAttribute("applications",store.findAll("application"));
@@ -266,7 +293,7 @@ public class RecruitmentController {
     String id=newId(); Map<String,Object> r=new LinkedHashMap<>(form);
     r.put("candidateName", candidate.get().get("fullName")); r.put("email", candidate.get().get("email"));
     r.put("company", firstNonBlank(employer.get().get("companyName"), employer.get().get("company"), employer.get().get("name")));
-    r.put("jobTitle", job.get().get("title")); r.remove("candidateId"); r.remove("employerId"); r.remove("jobId");
+    r.put("jobTitle", job.get().get("title")); r.put("candidateId", candidate.get().get("id")); r.put("employerId", employer.get().get("id")); r.put("jobId", job.get().get("id")); r.put("employerEmail", employer.get().get("email")); r.put("recruiterEmail", job.get().getOrDefault("recruiterEmail", ""));
     r.put("id",id); r.put("status","PLACED"); r.put("placedAt",LocalDate.now().toString()); store.save("placement",id,r); ra.addFlashAttribute("success","Placement recorded for the selected candidate, employer and job."); return "redirect:/placements";
   }
   @GetMapping("/reports") public String reports(Model m) { m.addAttribute("candidates",store.count("candidate")); m.addAttribute("employers",store.count("employer")); m.addAttribute("jobs",store.count("job")); m.addAttribute("applications",store.count("application")); m.addAttribute("interviews",store.count("interview")); m.addAttribute("placements",store.count("placement")); return "reports"; }
