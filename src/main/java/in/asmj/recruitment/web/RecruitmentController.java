@@ -53,10 +53,60 @@ public class RecruitmentController {
   }
   @GetMapping("/employer/dashboard") public String employerDashboard(Model m, Authentication auth) {
     m.addAttribute("name", auth.getName());
-    m.addAttribute("jobs", store.findAll("job").stream().filter(j -> auth.getName().equalsIgnoreCase(String.valueOf(j.get("employerEmail"))) || auth.getName().equalsIgnoreCase(String.valueOf(j.get("email")))).toList());
-    m.addAttribute("jobCount", store.count("job"));
-    m.addAttribute("applicationCount", store.count("application"));
+    m.addAttribute("jobs", store.findAll("job").stream().filter(j -> auth.getName().equalsIgnoreCase(String.valueOf(j.get("employerEmail")))).toList());
+    m.addAttribute("jobCount", store.findAll("job").stream().filter(j -> auth.getName().equalsIgnoreCase(String.valueOf(j.get("employerEmail")))).count());
+    m.addAttribute("applicationCount", store.findAll("application").stream().filter(a -> store.find("job", String.valueOf(a.get("jobId"))).map(j -> auth.getName().equalsIgnoreCase(String.valueOf(j.get("employerEmail")))).orElse(false)).count());
     return "employer-dashboard";
+  }
+
+  @GetMapping("/employer/authorizations") public String employerAuthorizations(Model m, Authentication auth) {
+    Map<String,Object> employer = findEmployerForEmail(auth.getName());
+    m.addAttribute("employer", employer);
+    m.addAttribute("recruiters", store.findAll("recruiterRegistration").stream().filter(r -> "APPROVED".equalsIgnoreCase(String.valueOf(r.get("status")))).toList());
+    String employerId = employer == null ? "" : String.valueOf(employer.get("id"));
+    m.addAttribute("authorizations", store.findAll("recruiterAuthorization").stream().filter(a -> employerId.equals(String.valueOf(a.get("employerId")))).toList());
+    return "employer-authorizations";
+  }
+
+  @PostMapping("/employer/authorizations/grant") public String grantRecruiterAuthorization(@RequestParam String recruiterId, Authentication auth, RedirectAttributes ra) {
+    Map<String,Object> employer = findEmployerForEmail(auth.getName());
+    Optional<Map<String,Object>> recruiterOpt = store.find("recruiterRegistration", recruiterId);
+    if (employer == null || recruiterOpt.isEmpty() || !"APPROVED".equalsIgnoreCase(String.valueOf(recruiterOpt.get().get("status")))) {
+      ra.addFlashAttribute("error", "Choose a valid approved recruiter and ensure your employer account is approved.");
+      return "redirect:/employer/authorizations";
+    }
+    Map<String,Object> recruiter = recruiterOpt.get();
+    String employerId = String.valueOf(employer.get("id"));
+    String recruiterEmail = normalizedEmail(String.valueOf(recruiter.get("email")));
+    Map<String,Object> existing = store.findAll("recruiterAuthorization").stream()
+      .filter(a -> employerId.equals(String.valueOf(a.get("employerId"))) && recruiterEmail.equalsIgnoreCase(String.valueOf(a.get("recruiterEmail"))))
+      .findFirst().orElse(null);
+    Map<String,Object> authorization = existing == null ? new LinkedHashMap<>() : new LinkedHashMap<>(existing);
+    String id = existing == null ? newId() : String.valueOf(existing.get("id"));
+    authorization.put("id", id); authorization.put("employerId", employerId);
+    authorization.put("employerEmail", auth.getName());
+    authorization.put("companyName", firstNonBlank(employer.get("companyName"), employer.get("company"), employer.get("name")));
+    authorization.put("recruiterId", recruiterId); authorization.put("recruiterEmail", recruiterEmail);
+    authorization.put("recruiterName", firstNonBlank(recruiter.get("fullName"), recruiter.get("name"), recruiter.get("agencyName")));
+    authorization.put("status", "ACTIVE"); authorization.put("grantedAt", LocalDate.now().toString());
+    authorization.put("canPostJobs", true); authorization.put("canManageCandidates", true);
+    store.save("recruiterAuthorization", id, authorization);
+    ra.addFlashAttribute("success", "Recruiter authorized. They can now select your company when posting jobs.");
+    return "redirect:/employer/authorizations";
+  }
+
+  @PostMapping("/employer/authorizations/{id}/revoke") public String revokeRecruiterAuthorization(@PathVariable String id, Authentication auth, RedirectAttributes ra) {
+    Optional<Map<String,Object>> found = store.find("recruiterAuthorization", id);
+    if (found.isPresent() && auth.getName().equalsIgnoreCase(String.valueOf(found.get().get("employerEmail")))) {
+      Map<String,Object> record = found.get(); record.put("status", "REVOKED"); record.put("revokedAt", LocalDate.now().toString()); store.save("recruiterAuthorization", id, record);
+      ra.addFlashAttribute("success", "Recruiter authorization revoked. They can no longer post new jobs for your company.");
+    } else ra.addFlashAttribute("error", "Authorization not found for your company.");
+    return "redirect:/employer/authorizations";
+  }
+
+  private Map<String,Object> findEmployerForEmail(String email) {
+    return store.findAll("employer").stream().filter(e -> email.equalsIgnoreCase(String.valueOf(e.get("email"))) && "APPROVED".equalsIgnoreCase(String.valueOf(e.get("status"))))
+      .findFirst().orElseGet(() -> store.findAll("employerRegistration").stream().filter(e -> email.equalsIgnoreCase(String.valueOf(e.get("email"))) && "APPROVED".equalsIgnoreCase(String.valueOf(e.get("status")))).findFirst().orElse(null));
   }
   private void populateDashboard(Model m, Authentication auth) {
     m.addAttribute("candidateCount",store.count("candidate")); m.addAttribute("employerCount",store.count("employer"));
@@ -142,46 +192,41 @@ public class RecruitmentController {
   @PostMapping("/employers/save") public String saveEmployer(@RequestParam Map<String,String> form, RedirectAttributes ra) { String id=newId(); Map<String,Object> r=new LinkedHashMap<>(form); r.put("id",id); r.put("status","ACTIVE"); r.put("createdAt",LocalDate.now().toString()); store.save("employer",id,r); ra.addFlashAttribute("success","Employer saved."); return "redirect:/employers"; }
   @GetMapping("/jobs/new") public String jobForm(Model m, Authentication auth) {
     List<Map<String,Object>> employers = store.findAll("employer").stream()
-      .filter(e -> !"REJECTED".equalsIgnoreCase(String.valueOf(e.get("status"))))
-      .filter(e -> !"PENDING_APPROVAL".equalsIgnoreCase(String.valueOf(e.get("status"))))
+      .filter(e -> "APPROVED".equalsIgnoreCase(String.valueOf(e.get("status"))))
       .toList();
-    // Employer accounts can only publish for their own approved company. Recruiters/admins can select any approved employer.
     if (hasRole(auth, "ROLE_EMPLOYER")) {
       employers = employers.stream().filter(e -> auth.getName().equalsIgnoreCase(String.valueOf(e.get("email")))).toList();
-      if (employers.isEmpty()) {
-        employers = store.findAll("employerRegistration").stream()
-          .filter(e -> auth.getName().equalsIgnoreCase(String.valueOf(e.get("email"))) && "APPROVED".equalsIgnoreCase(String.valueOf(e.get("status"))))
-          .toList();
-      }
+    } else if (hasRole(auth, "ROLE_RECRUITER")) {
+      Set<String> authorizedIds = new HashSet<>();
+      store.findAll("recruiterAuthorization").stream()
+        .filter(a -> auth.getName().equalsIgnoreCase(String.valueOf(a.get("recruiterEmail"))) && "ACTIVE".equalsIgnoreCase(String.valueOf(a.get("status"))) && Boolean.TRUE.equals(a.get("canPostJobs")))
+        .forEach(a -> authorizedIds.add(String.valueOf(a.get("employerId"))));
+      employers = employers.stream().filter(e -> authorizedIds.contains(String.valueOf(e.get("id")))).toList();
     }
     m.addAttribute("employers", employers);
     m.addAttribute("canSelectEmployer", hasRole(auth, "ROLE_ADMIN") || hasRole(auth, "ROLE_RECRUITER"));
+    m.addAttribute("isRecruiter", hasRole(auth, "ROLE_RECRUITER"));
     return "job-form";
   }
   @PostMapping("/jobs/save") public String saveJob(@RequestParam Map<String,String> form, Authentication auth, RedirectAttributes ra) {
     String employerId = form.getOrDefault("employerId", "").trim();
-    Map<String,Object> employer = null;
-    if (!employerId.isBlank()) employer = store.find("employer", employerId).orElse(null);
-    if (employer == null && hasRole(auth, "ROLE_EMPLOYER")) {
-      employer = store.findAll("employer").stream().filter(e -> auth.getName().equalsIgnoreCase(String.valueOf(e.get("email")))).findFirst().orElse(null);
-      if (employer != null) employerId = String.valueOf(employer.get("id"));
-    }
-    if (employer == null) {
+    Map<String,Object> employer = employerId.isBlank() ? null : store.find("employer", employerId).orElse(null);
+    if (employer == null || !"APPROVED".equalsIgnoreCase(String.valueOf(employer.get("status")))) {
       ra.addFlashAttribute("error", "Select an approved employer from the dropdown before publishing this job."); return "redirect:/jobs/new";
     }
-    if (hasRole(auth, "ROLE_EMPLOYER") && employer != null && !auth.getName().equalsIgnoreCase(String.valueOf(employer.get("email")))) {
+    if (hasRole(auth, "ROLE_EMPLOYER") && !auth.getName().equalsIgnoreCase(String.valueOf(employer.get("email")))) {
       ra.addFlashAttribute("error", "Employer accounts can publish jobs only for their own company."); return "redirect:/jobs/new";
     }
-    String id=newId(); Map<String,Object> r=new LinkedHashMap<>(form);
-    if (employer != null) {
-      r.put("employerId", employerId);
-      r.put("company", firstNonBlank(employer.get("companyName"), employer.get("company"), employer.get("name")));
-      r.put("employerEmail", employer.get("email"));
-    } else {
-      r.putIfAbsent("company", "ASMJ Recruitment");
+    if (hasRole(auth, "ROLE_RECRUITER")) {
+      boolean authorized = store.findAll("recruiterAuthorization").stream().anyMatch(a -> auth.getName().equalsIgnoreCase(String.valueOf(a.get("recruiterEmail"))) && employerId.equals(String.valueOf(a.get("employerId"))) && "ACTIVE".equalsIgnoreCase(String.valueOf(a.get("status"))) && Boolean.TRUE.equals(a.get("canPostJobs")));
+      if (!authorized) { ra.addFlashAttribute("error", "This employer has not authorized you to post jobs. Ask the employer to grant access first."); return "redirect:/jobs/new"; }
     }
-    r.put("id",id); r.putIfAbsent("status","OPEN"); r.put("createdAt",LocalDate.now().toString()); r.put("postedBy",auth.getName());
-    store.save("job",id,r); ra.addFlashAttribute("success","Job opening published and linked to the selected employer."); return "redirect:/jobs";
+    Map<String,Object> r=new LinkedHashMap<>(form);
+    r.put("employerId", employerId);
+    r.put("company", firstNonBlank(employer.get("companyName"), employer.get("company"), employer.get("name")));
+    r.put("employerEmail", employer.get("email"));
+    r.put("id",newId()); r.putIfAbsent("status","OPEN"); r.put("createdAt",LocalDate.now().toString()); r.put("postedBy",auth.getName());
+    store.save("job",String.valueOf(r.get("id")),r); ra.addFlashAttribute("success","Job opening published and linked to the selected employer."); return "redirect:/jobs";
   }
   @PostMapping("/jobs/{id}/apply") public String apply(@PathVariable String id, @RequestParam String fullName, @RequestParam String email, @RequestParam(required=false) String phone, RedirectAttributes ra) {
     Map<String,Object> job=store.find("job",id).orElseThrow(); String appId=newId(); Map<String,Object> a=new LinkedHashMap<>(); a.put("id",appId); a.put("jobId",id); a.put("jobTitle",job.get("title")); a.put("fullName",fullName); a.put("email",normalizedEmail(email)); a.put("phone",phone); a.put("status","APPLIED"); a.put("appliedAt",LocalDate.now().toString()); store.save("application",appId,a); ra.addFlashAttribute("success","Application submitted. Reference: "+appId); return "redirect:/opportunity/"+id;

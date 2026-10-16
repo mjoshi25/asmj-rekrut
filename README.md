@@ -89,3 +89,16 @@ The project includes a root-level `Dockerfile`. Build with `docker build -t asmj
 - Interview scheduling selects an existing candidate and an open job. Candidate email and job/company details are copied from the selected records rather than retyped.
 - Placement recording selects an existing candidate, employer and job, keeping the saved details consistent.
 - If there are no approved employers, job posting remains disabled until an administrator adds or approves an employer.
+
+
+## Employer-to-recruiter authorization workflow
+
+1. An employer registers and must be approved by the ASMJ administrator.
+2. A recruiter registers and must also be approved by the administrator.
+3. The employer signs in and opens **Employer dashboard → Recruiter authorizations** (`/employer/authorizations`).
+4. The employer selects an approved recruiter and grants authorization. The authorization is saved as a `recruiterAuthorization` record with active status and job-posting permission.
+5. The recruiter signs in and opens **Post a job** (`/jobs/new`). The employer dropdown contains only companies that have granted active authorization to that recruiter.
+6. The server checks authorization again on job submission; changing the HTML form or submitting another employer ID cannot bypass the permission.
+7. The employer can revoke authorization at any time. A revoked recruiter cannot create new jobs for that employer.
+
+Authorization records are stored through the configured `RecordStore` adapter, so they persist with the selected H2 or MongoDB backend.
