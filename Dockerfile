@@ -1,4 +1,3 @@
-```dockerfile
 FROM maven:3.9.9-eclipse-temurin-17 AS build
 
 WORKDIR /app
@@ -19,4 +18,3 @@ EXPOSE 8080
 ENV SERVER_PORT=8080
 
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
-```
