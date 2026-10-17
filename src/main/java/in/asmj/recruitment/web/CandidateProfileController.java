@@ -99,8 +99,13 @@ public class CandidateProfileController {
             String value=readExcelCell(row.getCell(c),fmt,key);
             if(!key.isBlank()) values.put(key,value);
           }
-          String importMarker=values.getOrDefault("importrowclearSampletoimport".toLowerCase(Locale.ROOT), values.getOrDefault("examplerowclearsampletoimport", ""));
-          if ("sample".equalsIgnoreCase(importMarker.trim())) continue;
+          // SAMPLE is a demonstration marker, not an instruction to discard the row.
+          // This lets a user import the downloaded workbook as a working example.
+          // To intentionally ignore a row, put SKIP in the final marker column.
+          String importMarker=values.getOrDefault("importrowclearsampletoimport", "").trim();
+          if ("skip".equalsIgnoreCase(importMarker)) continue;
+          // Remove the visual sample prefix from example values before saving.
+          values.replaceAll((key,value) -> value == null ? "" : value.replaceFirst("(?i)^SAMPLE\\s*[-:]\\s*", "").trim());
           if(values.values().stream().anyMatch(v->v!=null&&!v.isBlank())) { rows.add(values); importedRows++; }
         }
         if(rows.isEmpty()) continue;
@@ -175,8 +180,8 @@ public class CandidateProfileController {
     Sheet sheet=wb.createSheet("Instructions");
     String[][] rows={
       {"ASMJ Recruitment - Excel profile import","Instructions"},
-      {"1. Sample rows","Yellow rows are examples only. Replace the example values and clear the SAMPLE marker in the last column to import that row, or delete the sample row."},
-      {"2. Add multiple records","Education, Projects, Technology Experience, Languages and Employment support multiple rows. Copy the header format and add one record per row. Leave the marker column blank for real rows."},
+      {"1. Sample rows","Yellow rows are examples and are imported unless you put SKIP in the last marker column. Replace sample values before using this as your own profile."},
+      {"2. Add multiple records","Education, Projects, Technology Experience, Languages and Employment support multiple rows. Copy the header format and add one record per row. Put SKIP in the marker column only for rows you want ignored."},
       {"3. Month/year format","Enter start and end months as YYYY-MM, for example 2023-07. Excel date cells are also accepted and normalized to YYYY-MM."},
       {"4. Current project/job","For a current project, set Currently Working to Yes and leave End Month blank. For current employment, enter Present in End Month."},
       {"5. Personal Information","Use one row only. Replace sample name, phone, address, experience, summary and skills with your own details."},
