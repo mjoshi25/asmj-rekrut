@@ -125,3 +125,16 @@ Authorization records are stored through the configured `RecordStore` adapter, s
 Candidates can download **ASMJ_Detailed_Candidate_Profile_Template.xlsx** from Candidate Profile. The workbook has these worksheets: Personal Information, Education, Projects, Technology Experience, Languages, Employment, Certifications & Other, and Instructions. Each worksheet contains a yellow sample row that demonstrates the expected format. Replace the sample values and clear `SAMPLE` from the final `Import Row - clear SAMPLE to import` column, or delete the sample row; rows marked `SAMPLE` are intentionally ignored. For additional records, add one record per row and leave the marker column blank. Dates should use `YYYY-MM` (for example `2024-07`); actual Excel date cells are also accepted and normalized to `YYYY-MM`. Enter `Present` for a current job or use `Yes` in Currently Working for an active project. Importing saves the structured data into the signed-in candidate's profile; review it and use Save Profile to regenerate the resume. Keep the first row as the column headers.
 
 Recruiter candidate search supports experience filters such as `3` (3 years up to but not including 4), `3-5` (from 3 years through exactly 5 years), `3 to 5`, and `5+` (at least 5 years). Experience values may be stored as a number, decimal years, or text such as `3 years 6 months`.
+
+## Hiring workflow (added 17 October 2026)
+
+- When an authorized employer or recruiter changes an application status to `HIRED`, the candidate gets an in-app hiring notification and a joining-document request on **Hiring & offers** (`/candidate/hiring`).
+- Candidates can upload joining documents (PDF, PNG, JPG/JPEG, DOC/DOCX; 5 MB maximum per file). Employers and explicitly authorized recruiters can review documents and mark them verified or request a re-upload.
+- Employers can upload an offer letter with salary/CTC, joining date and optional notes. Candidates can accept the current version or request a revision with comments. Every new upload creates a version; a previous pending version is marked superseded.
+- Private files are stored under `ASMJ_UPLOAD_DIR` (default `./data/private-uploads`) in `candidates/{candidateId}/{applicationId}/documents` and `offers`. Downloads are served through authenticated controller routes, not public static URLs.
+- Public **Founder** (`/founder`) and **Compliance** (`/compliance`) pages are linked in the main navigation. Compliance text is a starter draft and should be legally reviewed before production publication.
+
+### Production storage note
+
+On Render or another container host, configure `ASMJ_UPLOAD_DIR` to a mounted persistent disk path (for example `/var/data/private-uploads`) and mount the disk at that path. The default local directory is not durable across ephemeral deployments/restarts. Back up private uploaded files and the database together, restrict disk access, and define an approved retention/deletion policy.
+- Administrators can edit the Founder and Compliance public-page content at `/admin/site-content`; changes are persisted in the configured record store. Founder name remains blank until ASMJ confirms the official details.

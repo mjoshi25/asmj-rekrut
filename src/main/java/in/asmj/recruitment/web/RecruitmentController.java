@@ -243,12 +243,39 @@ public class RecruitmentController {
     }
     String appId=newId(); Map<String,Object> a=new LinkedHashMap<>(); a.put("id",appId); a.put("jobId",id); a.put("jobTitle",job.get("title")); a.put("company",job.get("company")); a.put("employerId",job.get("employerId")); a.put("employerEmail",job.get("employerEmail")); a.put("recruiterEmail",job.getOrDefault("recruiterEmail","")); a.put("candidateId",candidate==null?"":candidate.get("id")); a.put("fullName",fullName); a.put("email",normalized); a.put("phone",phone); a.put("alternateMobile",alternateMobile); a.put("status","APPLIED"); a.put("appliedAt",LocalDate.now().toString()); store.save("application",appId,a); ra.addFlashAttribute("success","Application submitted. Reference: "+appId); return "redirect:/opportunity/"+id;
   }
-  @GetMapping("/applications") public String applications(Model m) { m.addAttribute("records",store.findAll("application")); return "applications"; }
+  @GetMapping("/applications") public String applications(Model m, Authentication auth) {
+    List<Map<String,Object>> records = store.findAll("application");
+    if (!hasRole(auth, "ROLE_ADMIN")) {
+      if (hasRole(auth, "ROLE_EMPLOYER")) records = records.stream().filter(a -> auth.getName().equalsIgnoreCase(String.valueOf(a.get("employerEmail")))).toList();
+      else if (hasRole(auth, "ROLE_RECRUITER")) records = records.stream().filter(a -> auth.getName().equalsIgnoreCase(String.valueOf(a.get("recruiterEmail"))) && store.findAll("recruiterAuthorization").stream().anyMatch(x -> auth.getName().equalsIgnoreCase(String.valueOf(x.get("recruiterEmail"))) && String.valueOf(a.get("employerId")).equals(String.valueOf(x.get("employerId"))) && "ACTIVE".equalsIgnoreCase(String.valueOf(x.get("status"))) && Boolean.TRUE.equals(x.get("canManageCandidates")))).toList();
+      else records = List.of();
+    }
+    m.addAttribute("records", records); return "applications";
+  }
   @PostMapping("/applications/{id}/status") public String applicationStatus(@PathVariable String id,@RequestParam String status,RedirectAttributes ra) {
     if(!Set.of("APPLIED","SHORTLISTED","INTERVIEW","OFFERED","SELECTED","HIRED","REJECTED").contains(status)){ra.addFlashAttribute("error","Invalid application status.");return "redirect:/applications";}
-    Map<String,Object> a=store.find("application",id).orElseThrow(); a.put("status",status); a.put("statusUpdatedAt",LocalDate.now().toString()); store.save("application",id,a);
+    Map<String,Object> a=store.find("application",id).orElseThrow();
+    if (!canManageApplication(a, org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication())) { ra.addFlashAttribute("error", "You are not authorized to update this application."); return "redirect:/applications"; }
+    String previous = String.valueOf(a.getOrDefault("status", "APPLIED"));
+    a.put("status",status); a.put("statusUpdatedAt",LocalDate.now().toString());
+    if ("HIRED".equals(status) && !"HIRED".equals(previous)) {
+      a.put("documentRequestStatus", "REQUESTED"); a.put("documentsRequestedAt", LocalDate.now().toString());
+      String notificationId = newId(); Map<String,Object> n = new LinkedHashMap<>(); n.put("id", notificationId); n.put("candidateEmail", a.get("email")); n.put("applicationId", id); n.put("type", "JOINING_DOCUMENTS_REQUIRED"); n.put("message", "Congratulations! You have been marked Hired for " + a.getOrDefault("jobTitle", "the role") + ". Please upload your joining documents."); n.put("createdAt", LocalDate.now().toString()); n.put("read", false); store.save("notification", notificationId, n);
+    }
+    store.save("application",id,a);
     if(Set.of("SELECTED","HIRED").contains(status)) createCommissionIfMissing(a);
-    ra.addFlashAttribute("success",Set.of("SELECTED","HIRED").contains(status)?"Candidate status updated. A commission record has been created or confirmed.":"Application status updated."); return "redirect:/applications";
+    ra.addFlashAttribute("success",Set.of("SELECTED","HIRED").contains(status)?("HIRED".equals(status)?"Candidate marked Hired. The candidate has been notified to upload joining documents. A commission record has been created or confirmed.":"Candidate status updated. A commission record has been created or confirmed."):"Application status updated."); return "redirect:/applications";
+  }
+  private boolean canManageApplication(Map<String,Object> app, Authentication auth) {
+    if (auth == null) return false;
+    if (hasRole(auth, "ROLE_ADMIN")) return true;
+    String employerEmail = String.valueOf(app.getOrDefault("employerEmail", ""));
+    if (hasRole(auth, "ROLE_EMPLOYER")) return auth.getName().equalsIgnoreCase(employerEmail);
+    if (hasRole(auth, "ROLE_RECRUITER")) {
+      String employerId = String.valueOf(app.getOrDefault("employerId", ""));
+      return auth.getName().equalsIgnoreCase(String.valueOf(app.getOrDefault("recruiterEmail", ""))) && store.findAll("recruiterAuthorization").stream().anyMatch(x -> auth.getName().equalsIgnoreCase(String.valueOf(x.get("recruiterEmail"))) && employerId.equals(String.valueOf(x.get("employerId"))) && "ACTIVE".equalsIgnoreCase(String.valueOf(x.get("status"))) && Boolean.TRUE.equals(x.get("canManageCandidates")));
+    }
+    return false;
   }
   private void createCommissionIfMissing(Map<String,Object> application) {
     boolean exists=store.findAll("commission").stream().anyMatch(c->String.valueOf(application.get("id")).equals(String.valueOf(c.get("applicationId")))); if(exists)return;

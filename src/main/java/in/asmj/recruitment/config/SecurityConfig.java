@@ -29,16 +29,17 @@ public class SecurityConfig {
 
   @Bean SecurityFilterChain security(HttpSecurity http) throws Exception {
     return http.authorizeHttpRequests(a -> a
-        .requestMatchers("/", "/jobs", "/opportunity/*", "/jobs/*/apply", "/register/**", "/login", "/css/**", "/js/**", "/images/**", "/h2-console/**", "/error").permitAll()
+        .requestMatchers("/", "/jobs", "/opportunity/*", "/jobs/*/apply", "/register/**", "/login", "/founder", "/compliance", "/css/**", "/js/**", "/images/**", "/h2-console/**", "/error").permitAll()
         .requestMatchers("/admin/**", "/reports/**").hasRole("ADMIN")
-        .requestMatchers("/candidate/profile/**", "/candidate/profile").hasRole("CANDIDATE")
+        .requestMatchers("/candidate/profile/**", "/candidate/profile", "/candidate/hiring/**").hasRole("CANDIDATE")
         .requestMatchers("/settings/**").authenticated()
         .requestMatchers("/candidate-search").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER")
         .requestMatchers("/candidates/*/resume").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER", "CANDIDATE")
         .requestMatchers("/recruiter/**").hasRole("RECRUITER")
         .requestMatchers("/employer/dashboard", "/employer/authorizations/**").hasRole("EMPLOYER")
         .requestMatchers("/candidates/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER")
-        .requestMatchers("/employers/**", "/jobs/new", "/jobs/save", "/applications/**", "/interviews/**", "/placements/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER")
+        .requestMatchers("/hiring/files/**").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER", "CANDIDATE")
+        .requestMatchers("/hiring/**", "/employers/**", "/jobs/new", "/jobs/save", "/applications/**", "/interviews/**", "/placements/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER")
         .requestMatchers("/portal/**").hasAnyRole("ADMIN", "RECRUITER", "EMPLOYER", "CANDIDATE")
         .anyRequest().authenticated())
       .formLogin(f -> f.loginPage("/login").successHandler((request, response, authentication) -> {
