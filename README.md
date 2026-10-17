@@ -138,3 +138,13 @@ Recruiter candidate search supports experience filters such as `3` (3 years up t
 
 On Render or another container host, configure `ASMJ_UPLOAD_DIR` to a mounted persistent disk path (for example `/var/data/private-uploads`) and mount the disk at that path. The default local directory is not durable across ephemeral deployments/restarts. Back up private uploaded files and the database together, restrict disk access, and define an approved retention/deletion policy.
 - Administrators can edit the Founder and Compliance public-page content at `/admin/site-content`; changes are persisted in the configured record store. Founder name remains blank until ASMJ confirms the official details.
+
+## Demo data added in this update
+
+On startup, the application idempotently creates a demo employer account and six sample job openings if their seeded records do not already exist. The jobs are attributed to `sarojkumar@asmj.co.in` and the demo company `ASMJ Talent Partners`; they are marked `isDemoSeed=true` so administrators can identify and replace them before public production use.
+
+- Demo employer login: `sarojkumar@asmj.co.in`
+- Initial password (only set when this account does not already exist): `Saroj@123`
+- Admin login from the existing setup: `admin@asmj.co.in` / `Admin@123`
+
+Change all demo credentials before production use. The seeder does not reset the password of an existing account and does not overwrite seeded job records once created. The administrator dashboard includes a setup checklist covering registrations, job review, private upload persistence, and policy publication.

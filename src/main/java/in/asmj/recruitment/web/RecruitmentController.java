@@ -111,7 +111,7 @@ public class RecruitmentController {
   private void populateDashboard(Model m, Authentication auth) {
     m.addAttribute("candidateCount",store.count("candidate")); m.addAttribute("employerCount",store.count("employer"));
     m.addAttribute("jobCount",store.count("job")); m.addAttribute("applicationCount",store.count("application"));
-    m.addAttribute("recentJobs",store.findAll("job").stream().limit(5).toList()); m.addAttribute("name",auth.getName());
+    m.addAttribute("recentJobs",store.findAll("job").stream().limit(5).toList()); m.addAttribute("name",auth.getName()); m.addAttribute("adminChecklist", store.find("settings", "adminGettingStarted").orElse(Map.of("items", List.of())));
   }
   private boolean hasRole(Authentication auth, String role) {
     return auth != null && auth.getAuthorities().stream().anyMatch(a -> role.equals(a.getAuthority()));
