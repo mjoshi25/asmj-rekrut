@@ -250,6 +250,17 @@ public class RecruitmentController {
       else if (hasRole(auth, "ROLE_RECRUITER")) records = records.stream().filter(a -> auth.getName().equalsIgnoreCase(String.valueOf(a.get("recruiterEmail"))) && store.findAll("recruiterAuthorization").stream().anyMatch(x -> auth.getName().equalsIgnoreCase(String.valueOf(x.get("recruiterEmail"))) && String.valueOf(a.get("employerId")).equals(String.valueOf(x.get("employerId"))) && "ACTIVE".equalsIgnoreCase(String.valueOf(x.get("status"))) && Boolean.TRUE.equals(x.get("canManageCandidates")))).toList();
       else records = List.of();
     }
+    // Older application records predate the hiring workflow and do not contain offerStatus.
+    // Populate display defaults before Thymeleaf evaluates applications.html.
+    for (Map<String,Object> record : records) {
+      record.putIfAbsent("offerStatus", "");
+      record.putIfAbsent("documentRequestStatus", "");
+      record.putIfAbsent("status", "APPLIED");
+      record.putIfAbsent("appliedAt", "");
+      record.putIfAbsent("fullName", "Candidate");
+      record.putIfAbsent("email", "");
+      record.putIfAbsent("jobTitle", "");
+    }
     m.addAttribute("records", records); return "applications";
   }
   @PostMapping("/applications/{id}/status") public String applicationStatus(@PathVariable String id,@RequestParam String status,RedirectAttributes ra) {
