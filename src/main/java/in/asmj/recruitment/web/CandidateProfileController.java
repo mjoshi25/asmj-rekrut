@@ -73,41 +73,100 @@ public class CandidateProfileController {
 
   @PostMapping(value="/candidate/profile/import", consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
   public String importExcel(@RequestParam("excelFile") MultipartFile file, Authentication auth, RedirectAttributes ra) {
-    if (file == null || file.isEmpty() || !(file.getOriginalFilename().toLowerCase(Locale.ROOT).endsWith(".xlsx") || file.getOriginalFilename().toLowerCase(Locale.ROOT).endsWith(".xls"))) {
+    if (file == null || file.isEmpty() || file.getOriginalFilename() == null ||
+        !(file.getOriginalFilename().toLowerCase(Locale.ROOT).endsWith(".xlsx") || file.getOriginalFilename().toLowerCase(Locale.ROOT).endsWith(".xls"))) {
       ra.addFlashAttribute("error","Upload an Excel .xlsx or .xls file."); return "redirect:/candidate/profile";
     }
     try (InputStream in=file.getInputStream(); Workbook wb=WorkbookFactory.create(in)) {
-      Sheet sheet=wb.getSheetAt(0); if (sheet.getPhysicalNumberOfRows()<2) throw new IllegalArgumentException("Add a header row and one candidate data row.");
-      DataFormatter fmt=new DataFormatter(); Row header=sheet.getRow(0), row=sheet.getRow(1);
-      if (header==null || row==null) throw new IllegalArgumentException("The spreadsheet is missing its header or profile row.");
-      Map<String,String> values=new LinkedHashMap<>();
-      for (int c=0;c<header.getLastCellNum();c++) {
-        String key=normalizeHeader(fmt.formatCellValue(header.getCell(c)));
-        if (!key.isBlank() && c<row.getLastCellNum()) values.put(key,fmt.formatCellValue(row.getCell(c)).trim());
-      }
+      DataFormatter fmt=new DataFormatter();
       Map<String,Object> existing=profileForEmail(auth.getName());
       Map<String,Object> profile=existing==null?new LinkedHashMap<>():new LinkedHashMap<>(existing);
       String id=existing==null?UUID.randomUUID().toString().substring(0,8).toUpperCase():String.valueOf(existing.get("id"));
       Map<String,String> mapping=Map.ofEntries(
-        Map.entry("fullname","fullName"),Map.entry("name","fullName"),Map.entry("email","email"),Map.entry("mobile","mobile"),Map.entry("mobilenumber","mobile"),Map.entry("alternatemobile","alternateMobile"),Map.entry("alternatephone","alternateMobile"),Map.entry("location","location"),Map.entry("currentaddress","currentAddress"),Map.entry("hobbies","hobbies"),Map.entry("city","city"),Map.entry("state","state"),Map.entry("pincode","pinCode"),Map.entry("highestqualification","qualification"),Map.entry("qualification","qualification"),Map.entry("experienceyears","experienceYears"),Map.entry("experience","experienceYears"),Map.entry("currentrole","currentRole"),Map.entry("desiredrole","desiredRole"),Map.entry("skills","skills"),Map.entry("summary","summary"),Map.entry("linkedinurl","linkedinUrl"),Map.entry("portfoliourl","portfolioUrl"),Map.entry("education","education"),Map.entry("workexperience","workExperience"),Map.entry("certifications","certifications"),Map.entry("languages","languages"));
-      for (var e:values.entrySet()) { String target=mapping.get(e.getKey()); if(target!=null && !target.equals("email") && !e.getValue().isBlank()) profile.put(target,e.getValue()); }
+        Map.entry("fullname","fullName"),Map.entry("name","fullName"),Map.entry("email","email"),Map.entry("mobile","mobile"),Map.entry("mobilenumber","mobile"),Map.entry("alternatemobile","alternateMobile"),Map.entry("alternatephone","alternateMobile"),Map.entry("currentaddress","currentAddress"),Map.entry("address","currentAddress"),Map.entry("location","location"),Map.entry("currentlocation","location"),Map.entry("city","city"),Map.entry("state","state"),Map.entry("pincode","pinCode"),Map.entry("highestqualification","qualification"),Map.entry("qualification","qualification"),Map.entry("experienceyears","experienceYears"),Map.entry("overallexperience","experienceYears"),Map.entry("overall experience","experienceYears"),Map.entry("experience","experienceYears"),Map.entry("currentrole","currentRole"),Map.entry("currentjobtitle","currentRole"),Map.entry("desiredrole","desiredRole"),Map.entry("targetrole","desiredRole"),Map.entry("skills","skills"),Map.entry("keyskills","skills"),Map.entry("summary","summary"),Map.entry("professionalsummary","summary"),Map.entry("linkedinurl","linkedinUrl"),Map.entry("linkedin","linkedinUrl"),Map.entry("portfoliourl","portfolioUrl"),Map.entry("githuburl","portfolioUrl"),Map.entry("hobbies","hobbies"),Map.entry("education","education"),Map.entry("workexperience","workExperience"),Map.entry("certifications","certifications"),Map.entry("additionalinformation","additionalInformation"),Map.entry("awards","additionalInformation"));
+      int importedRows=0;
+      for (int si=0; si<wb.getNumberOfSheets(); si++) {
+        Sheet sheet=wb.getSheetAt(si); if(sheet.getPhysicalNumberOfRows()<2) continue;
+        String sheetName=normalizeHeader(sheet.getSheetName());
+        Row header=sheet.getRow(0); if(header==null) continue;
+        List<Map<String,String>> rows=new ArrayList<>();
+        for(int ri=1;ri<=sheet.getLastRowNum();ri++) {
+          Row row=sheet.getRow(ri); if(row==null) continue;
+          Map<String,String> values=new LinkedHashMap<>();
+          for(int c=0;c<header.getLastCellNum();c++) {
+            String key=normalizeHeader(fmt.formatCellValue(header.getCell(c)));
+            String value=fmt.formatCellValue(row.getCell(c)).trim();
+            if(!key.isBlank()) values.put(key,value);
+          }
+          if(values.values().stream().anyMatch(v->v!=null&&!v.isBlank())) { rows.add(values); importedRows++; }
+        }
+        if(rows.isEmpty()) continue;
+        if(si==0 || sheetName.contains("personalinformation") || sheetName.equals("candidateprofile")) {
+          for(var entry:rows.get(0).entrySet()) {
+            String target=mapping.get(entry.getKey()); String value=entry.getValue();
+            if(target!=null && !target.equals("email") && value!=null&&!value.isBlank()) profile.put(target,value);
+          }
+        }
+        if(sheetName.contains("education")) {
+          List<Map<String,Object>> list=new ArrayList<>();
+          for(Map<String,String> r:rows) { Map<String,Object> x=pick(r, Map.ofEntries(Map.entry("qualification","qualification"),Map.entry("degree","qualification"),Map.entry("institution","institution"),Map.entry("university","institution"),Map.entry("specialization","specialization"),Map.entry("stream","specialization"),Map.entry("grade","grade"),Map.entry("percentage","grade"),Map.entry("cgpa","grade"),Map.entry("startmonth","startMonth"),Map.entry("startdate","startMonth"),Map.entry("endmonth","endMonth"),Map.entry("enddate","endMonth"),Map.entry("details","details"),Map.entry("achievements","details"))); if(!x.isEmpty()) list.add(x); }
+          profile.put("educationDetails",list);
+        } else if(sheetName.contains("project")) {
+          List<Map<String,Object>> list=new ArrayList<>();
+          for(Map<String,String> r:rows) { Map<String,Object> x=pick(r, Map.ofEntries(Map.entry("title","title"),Map.entry("projecttitle","title"),Map.entry("role","role"),Map.entry("yourrole","role"),Map.entry("startmonth","startMonth"),Map.entry("endmonth","endMonth"),Map.entry("current","current"),Map.entry("currentlyworking","current"),Map.entry("technologies","technologies"),Map.entry("technology","technologies"),Map.entry("description","description"),Map.entry("achievements","description"),Map.entry("url","url"),Map.entry("projecturl","url"))); if(!x.isEmpty()) { String current=String.valueOf(x.getOrDefault("current","")); x.put("current",List.of("true","yes","y","1","present").contains(current.toLowerCase(Locale.ROOT))); if(Boolean.TRUE.equals(x.get("current"))) x.put("endMonth",""); list.add(x); } }
+          profile.put("projectDetails",list);
+        } else if(sheetName.contains("technology") || sheetName.contains("skillsexperience")) {
+          List<Map<String,Object>> list=new ArrayList<>();
+          for(Map<String,String> r:rows) { Map<String,Object> x=pick(r, Map.ofEntries(Map.entry("technology","technology"),Map.entry("tool","technology"),Map.entry("level","level"),Map.entry("proficiencylevel","level"),Map.entry("years","years"),Map.entry("experienceyears","years"),Map.entry("months","months"),Map.entry("experiencemonths","months"),Map.entry("notes","notes"),Map.entry("lastused","notes"),Map.entry("lastusednotes","notes"))); if(!x.isEmpty()) list.add(x); }
+          profile.put("technologyExperience",list);
+        } else if(sheetName.contains("language")) {
+          List<Map<String,Object>> list=new ArrayList<>();
+          for(Map<String,String> r:rows) { Map<String,Object> x=pick(r, Map.ofEntries(Map.entry("language","language"),Map.entry("name","language"),Map.entry("proficiency","proficiency"),Map.entry("level","proficiency"))); if(!x.isEmpty()) list.add(x); }
+          profile.put("languagesKnown",list);
+          profile.put("languages",rows.stream().map(r->r.getOrDefault("language",r.getOrDefault("name",""))).filter(v->!v.isBlank()).collect(Collectors.joining(", ")));
+        } else if(sheetName.contains("employment") || sheetName.contains("workhistory") || sheetName.contains("careerhistory")) {
+          List<String> lines=new ArrayList<>();
+          for(Map<String,String> r:rows) { String line=String.join(" | ",List.of(r.getOrDefault("company",""),r.getOrDefault("jobtitle",r.getOrDefault("role","")),r.getOrDefault("startmonth",""),r.getOrDefault("endmonth",r.getOrDefault("enddate","Present")),r.getOrDefault("responsibilities",""),r.getOrDefault("achievements",""))).replaceAll("( \\| )+"," | ").replaceAll("^ \\| | \\| $","").trim(); if(!line.isBlank()) lines.add(line); }
+          if(!lines.isEmpty()) profile.put("workExperience",String.join("\n",lines));
+        } else if(sheetName.contains("additional") || sheetName.contains("certification")) {
+          for(Map<String,String> r:rows) { String cert=r.getOrDefault("certification",r.getOrDefault("certificationname","")); if(!cert.isBlank()) profile.put("certifications",String.valueOf(profile.getOrDefault("certifications","")).concat(String.valueOf(profile.getOrDefault("certifications","")).isBlank()?"":"\n").concat(cert+(r.getOrDefault("issuingbody","").isBlank()?"":" - "+r.get("issuingbody"))+(r.getOrDefault("year","").isBlank()?"":" ("+r.get("year")+")"))); String add=r.get("additionalinformation"); if(add==null||add.isBlank()) add=r.getOrDefault("awards",""); if(!add.isBlank()) profile.put("additionalInformation",String.valueOf(profile.getOrDefault("additionalInformation","")).concat(String.valueOf(profile.getOrDefault("additionalInformation","")).isBlank()?"":"\n").concat(add)); }
+        }
+      }
+      if(importedRows==0) throw new IllegalArgumentException("No profile data rows found. Fill in the downloaded template and try again.");
       profile.put("id",id); profile.put("email",auth.getName().trim().toLowerCase(Locale.ROOT)); profile.put("status",profile.getOrDefault("status","ACTIVE")); profile.put("profileUpdatedAt",java.time.LocalDate.now().toString());
       store.save("candidate",id,profile);
-      ra.addFlashAttribute("success","Excel details imported into your profile. Review the fields and save any changes to regenerate your resume.");
-    } catch (Exception e) { ra.addFlashAttribute("error","Could not import Excel: "+(e.getMessage()==null?"check the template and try again":e.getMessage())); }
+      ra.addFlashAttribute("success","Excel details imported into your profile, including repeated education, project, technology and language entries. Review your profile and save to regenerate the resume.");
+    } catch (Exception e) { ra.addFlashAttribute("error","Could not import Excel: "+(e.getMessage()==null?"check the downloaded template and try again":e.getMessage())); }
     return "redirect:/candidate/profile";
   }
 
   @GetMapping("/candidate/profile/template.xlsx")
   public ResponseEntity<byte[]> template() throws Exception {
     try (Workbook wb=new XSSFWorkbook(); ByteArrayOutputStream out=new ByteArrayOutputStream()) {
-      Sheet sh=wb.createSheet("Candidate Profile");
-      String[] headers={"Full Name","Email","Mobile","Alternate Mobile","Location","City","State","PIN Code","Highest Qualification","Experience Years","Current Role","Desired Role","Skills","Summary","LinkedIn URL","Portfolio URL","Education","Work Experience","Certifications","Languages"};
-      Row h=sh.createRow(0); for(int i=0;i<headers.length;i++){h.createCell(i).setCellValue(headers[i]);sh.setColumnWidth(i, Math.min(12000,Math.max(4000,headers[i].length()*420)));}
-      Row sample=sh.createRow(1); for(int i=0;i<headers.length;i++) sample.createCell(i).setCellValue(i==1?"your.email@example.com":i==0?"Your Full Name":"");
+      CellStyle head=wb.createCellStyle(); Font font=wb.createFont(); font.setBold(true); head.setFont(font); head.setFillForegroundColor(IndexedColors.LIGHT_CORNFLOWER_BLUE.getIndex()); head.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+      addSheet(wb,"Personal Information",new String[]{"Full Name","Mobile","Alternate Mobile","Current Address","City","State","PIN Code","Current Location","LinkedIn URL","Portfolio URL","Hobbies","Current Role","Desired Role","Highest Qualification","Overall Experience","Professional Summary","Key Skills"},new String[]{"Your Full Name","","","","","","","","","","","","","","e.g. 3 years 6 months","",""},head);
+      addSheet(wb,"Education",new String[]{"Qualification","Institution","Specialization","Grade","Start Month","End Month","Details"},new String[]{"B.Tech","Example University","Computer Science","80%","2019-07","2023-06","Awards or achievements"},head);
+      addSheet(wb,"Projects",new String[]{"Project Title","Role","Start Month","End Month","Currently Working","Technologies","Description","Project URL"},new String[]{"Sample project","Developer","2024-01","","Yes","Java, Spring Boot, MongoDB","Briefly describe your contribution","https://example.com"},head);
+      addSheet(wb,"Technology Experience",new String[]{"Technology","Level","Years","Months","Last Used / Notes"},new String[]{"Java","Advanced","3","6","Used in current project"},head);
+      addSheet(wb,"Languages",new String[]{"Language","Proficiency"},new String[]{"English","Professional"},head);
+      addSheet(wb,"Employment",new String[]{"Company","Job Title","Start Month","End Month","Responsibilities","Achievements"},new String[]{"Example Company","Software Developer","2023-07","Present","Describe your responsibilities","Describe measurable results"},head);
+      addSheet(wb,"Certifications & Other",new String[]{"Certification Name","Issuing Body","Year","Additional Information","Awards"},new String[]{"Example certification","Issuing organization","2024","Volunteering, publications, etc.","Award name"},head);
       wb.write(out);
-      return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=ASMJ_Candidate_Profile_Template.xlsx").contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).body(out.toByteArray());
+      return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=ASMJ_Detailed_Candidate_Profile_Template.xlsx").contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).body(out.toByteArray());
     }
+  }
+
+  private void addSheet(Workbook wb,String name,String[] headers,String[] sample,CellStyle head) {
+    Sheet sheet=wb.createSheet(name); Row h=sheet.createRow(0);
+    for(int i=0;i<headers.length;i++){Cell cell=h.createCell(i);cell.setCellValue(headers[i]);cell.setCellStyle(head);sheet.setColumnWidth(i,Math.min(16000,Math.max(4200,headers[i].length()*420)));}
+    sheet.createRow(1); // Keep the first data row blank so example text cannot accidentally be imported as candidate information.
+    sheet.createFreezePane(0,1); sheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(0,Math.max(1,sheet.getLastRowNum()),0,headers.length-1));
+  }
+
+  private Map<String,Object> pick(Map<String,String> row,Map<String,String> mapping) {
+    Map<String,Object> result=new LinkedHashMap<>();
+    row.forEach((key,value)->{String target=mapping.get(key);if(target!=null&&value!=null&&!value.isBlank())result.put(target,value);});
+    return result;
   }
 
   @GetMapping("/candidates/{id}/resume")
@@ -125,10 +184,38 @@ public class CandidateProfileController {
     if(q!=null&&!q.isBlank()) candidates=candidates.stream().filter(c->contains(c,"fullName",q)||contains(c,"desiredRole",q)||contains(c,"currentRole",q)||contains(c,"email",q)).toList();
     if(skills!=null&&!skills.isBlank()) candidates=candidates.stream().filter(c->contains(c,"skills",skills)).toList();
     if(qualification!=null&&!qualification.isBlank()) candidates=candidates.stream().filter(c->contains(c,"qualification",qualification)).toList();
-    if(experience!=null&&!experience.isBlank()) candidates=candidates.stream().filter(c->contains(c,"experienceYears",experience)).toList();
+    if(experience!=null&&!experience.isBlank()) candidates=candidates.stream().filter(c->matchesExperience(c,experience)).toList();
     if(location!=null&&!location.isBlank()) candidates=candidates.stream().filter(c->contains(c,"location",location)||contains(c,"city",location)||contains(c,"state",location)).toList();
     model.addAttribute("records",candidates); model.addAttribute("q",q==null?"":q); model.addAttribute("skills",skills==null?"":skills); model.addAttribute("qualification",qualification==null?"":qualification); model.addAttribute("experience",experience==null?"":experience); model.addAttribute("location",location==null?"":location);
     return "candidate-search";
+  }
+
+  private boolean matchesExperience(Map<String,Object> candidate,String filter) {
+    String f=filter.trim().toLowerCase(Locale.ROOT);
+    int total=experienceMonths(candidate.get("experienceYears"));
+    if(total<0) total=experienceMonths(candidate.get("experience"));
+    if(total<0) return false;
+    try {
+      java.util.regex.Matcher range=java.util.regex.Pattern.compile("^(\\d+(?:\\.\\d+)?)\\s*(?:-|–|to)\\s*(\\d+(?:\\.\\d+)?)(?:\\s*(?:years?|yrs?))?$").matcher(f);
+      if(range.matches()) { double min=Double.parseDouble(range.group(1)), max=Double.parseDouble(range.group(2)); return total>=Math.round(min*12) && total<=Math.round(max*12); }
+      java.util.regex.Matcher plus=java.util.regex.Pattern.compile("^(\\d+(?:\\.\\d+)?)\\s*\\+$").matcher(f);
+      if(plus.matches()) return total>=Math.round(Double.parseDouble(plus.group(1))*12);
+      if(f.matches("\\d+(?:\\.\\d+)?(?:\\s*(?:years?|yrs?))?")) { double years=Double.parseDouble(f.replaceAll("\\s*(?:years?|yrs?)$", "")); return total>=Math.round(years*12) && total<Math.round(years*12)+12; }
+      if(f.matches(".*(?:years?|yrs?|months?|mos?).*")) { int requested=experienceMonths(f); return requested>=0 && total==requested; }
+    } catch(NumberFormatException ignored) { return false; }
+    return String.valueOf(candidate.getOrDefault("experienceYears",candidate.getOrDefault("experience",""))).toLowerCase(Locale.ROOT).contains(f);
+  }
+
+  private int experienceMonths(Object value) {
+    if(value==null) return -1;
+    String s=String.valueOf(value).trim().toLowerCase(Locale.ROOT);
+    if(s.isBlank()) return -1;
+    try { if(s.matches("\\d+(?:\\.\\d+)?")) return (int)Math.round(Double.parseDouble(s)*12); } catch(NumberFormatException ignored) { return -1; }
+    java.util.regex.Matcher ym=java.util.regex.Pattern.compile("(?:(\\d+(?:\\.\\d+)?)\\s*(?:years?|yrs?|y)\\b)?\\s*(?:(\\d+)\\s*(?:months?|mos?|m)\\b)?").matcher(s);
+    if(ym.matches() && (ym.group(1)!=null||ym.group(2)!=null)) { double years=ym.group(1)==null?0:Double.parseDouble(ym.group(1)); int months=ym.group(2)==null?0:Integer.parseInt(ym.group(2)); return (int)Math.round(years*12)+months; }
+    java.util.regex.Matcher number=java.util.regex.Pattern.compile("^(\\d+(?:\\.\\d+)?)").matcher(s);
+    if(number.find()) try { return (int)Math.round(Double.parseDouble(number.group(1))*12); } catch(NumberFormatException ignored) { return -1; }
+    return -1;
   }
 
   private boolean canViewCandidate(Authentication auth,Map<String,Object> c) {

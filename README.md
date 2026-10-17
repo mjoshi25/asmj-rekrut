@@ -118,3 +118,10 @@ Authorization records are stored through the configured `RecordStore` adapter, s
 - Signed-in candidates can upload or replace a profile photo from **My profile**. Photos are uploaded to Cloudinary and the resulting `photoUrl` is stored with the candidate profile record; configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the deployment environment.
 - The candidate profile and generated resume use map-safe Thymeleaf access for optional profile fields, including `photoUrl`, so absent optional values do not cause a template property-resolution error.
 - All authenticated roles have a **Settings** navigation link. The settings page displays the signed-in account and roles and supports password changes after verifying the current password. New passwords must be at least eight characters and match confirmation.
+
+
+### Detailed candidate Excel import
+
+Candidates can download **ASMJ_Detailed_Candidate_Profile_Template.xlsx** from Candidate Profile. The workbook has these worksheets: Personal Information, Education, Projects, Technology Experience, Languages, Employment, and Certifications & Other. Enter one record per row on repeatable worksheets; add as many education, project, technology, language, employment, or certification rows as needed. Dates should use `YYYY-MM` (for example `2024-07`); enter `Present` for a current job or use `Yes` in Currently Working for an active project. Importing saves the structured data into the signed-in candidate's profile; review it and use Save Profile to regenerate the resume. Keep the first row as the column headers.
+
+Recruiter candidate search supports experience filters such as `3` (3 years up to but not including 4), `3-5` (from 3 years through exactly 5 years), `3 to 5`, and `5+` (at least 5 years). Experience values may be stored as a number, decimal years, or text such as `3 years 6 months`.
