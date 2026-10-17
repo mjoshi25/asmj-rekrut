@@ -189,9 +189,28 @@ public class CandidateProfileController {
 
   private String readExcelCell(Cell cell,DataFormatter formatter,String headerKey) {
     if(cell==null) return "";
-    if(DateUtil.isCellDateFormatted(cell) && (headerKey.contains("month") || headerKey.contains("date"))) {
-      try { return DateUtil.getLocalDateTime(cell.getNumericCellValue()).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM")); }
-      catch(Exception ignored) { }
+    // Excel date cells are stored as numeric serials. Some users type dates as text,
+    // even when the cell has a date number format, so never call getNumericCellValue()
+    // unless the underlying cell is actually numeric.
+    if(cell.getCellType() == CellType.NUMERIC
+        && DateUtil.isCellDateFormatted(cell)
+        && (headerKey.contains("month") || headerKey.contains("date"))) {
+      try {
+        return DateUtil.getLocalDateTime(cell.getNumericCellValue()).toLocalDate()
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"));
+      } catch(Exception ignored) { /* Fall through and parse the displayed cell text. */ }
+    }
+    if(cell.getCellType() == CellType.FORMULA
+        && (headerKey.contains("month") || headerKey.contains("date"))) {
+      try {
+        CellValue cached = cell.getSheet().getWorkbook().getCreationHelper()
+            .createFormulaEvaluator().evaluate(cell);
+        if(cached != null && cached.getCellType() == CellType.NUMERIC
+            && DateUtil.isCellDateFormatted(cell)) {
+          return DateUtil.getLocalDateTime(cached.getNumberValue()).toLocalDate()
+              .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"));
+        }
+      } catch(Exception ignored) { /* Fall through and parse the displayed cell text. */ }
     }
     String value=formatter.formatCellValue(cell).trim();
     if(value.isBlank() || !(headerKey.contains("month") || headerKey.contains("date"))) return value;
