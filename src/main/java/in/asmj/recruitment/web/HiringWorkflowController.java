@@ -42,7 +42,7 @@ public class HiringWorkflowController {
     Map<String,Object> app = application(applicationId);
     if (!isCandidateOwner(app, auth)) return deny(ra, "/candidate/hiring");
     if (!"HIRED".equalsIgnoreCase(String.valueOf(app.get("status")))) { ra.addFlashAttribute("error", "Joining documents can be uploaded after the application is marked Hired."); return "redirect:/candidate/hiring"; }
-    if (file == null || file.isEmpty() || file.getSize() > 5L * 1024 * 1024) { ra.addFlashAttribute("error", "Choose a file up to 5 MB."); return "redirect:/candidate/hiring"; }
+    if (file == null || file.isEmpty() || file.getSize() > 8L * 1024 * 1024) { ra.addFlashAttribute("error", "Choose a file up to 8 MB."); return "redirect:/candidate/hiring"; }
     String safeType = documentType == null ? "Other" : documentType.trim();
     String uploadExt = extension(Objects.requireNonNullElse(file.getOriginalFilename(), "")).toLowerCase(Locale.ROOT);
     if (!Set.of(".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx").contains(uploadExt)) { ra.addFlashAttribute("error", "Allowed document formats: PDF, PNG, JPG, DOC or DOCX."); return "redirect:/candidate/hiring"; }
@@ -72,11 +72,11 @@ public class HiringWorkflowController {
   }
 
   @PostMapping("/hiring/applications/{applicationId}/offer")
-  public String uploadOffer(@PathVariable String applicationId, @RequestParam("file") MultipartFile file, @RequestParam(required=false) String salary, @RequestParam(required=false) String joiningDate, @RequestParam(required=false) String notes, Authentication auth, RedirectAttributes ra) {
+  public String uploadOffer(@PathVariable String applicationId, @RequestParam(value="file", required=false) MultipartFile file, @RequestParam(required=false) String salary, @RequestParam(required=false) String joiningDate, @RequestParam(required=false) String notes, Authentication auth, RedirectAttributes ra) {
     Map<String,Object> app = application(applicationId);
     if (!canEmployerAccess(app, auth)) return deny(ra, "/applications");
     if (!"HIRED".equalsIgnoreCase(String.valueOf(app.get("status")))) { ra.addFlashAttribute("error", "Mark the candidate Hired before issuing an offer letter."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
-    if (file == null || file.isEmpty() || file.getSize() > 5L * 1024 * 1024) { ra.addFlashAttribute("error", "Choose an offer letter file up to 5 MB."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
+    if (file == null || file.isEmpty() || file.getSize() > 8L * 1024 * 1024) { ra.addFlashAttribute("error", "Choose an offer letter file up to 8 MB."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
     String offerExt = extension(Objects.requireNonNullElse(file.getOriginalFilename(), "")).toLowerCase(Locale.ROOT);
     if (!Set.of(".pdf", ".doc", ".docx").contains(offerExt)) { ra.addFlashAttribute("error", "Offer letters must be PDF, DOC or DOCX files."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
     try {
@@ -88,7 +88,7 @@ public class HiringWorkflowController {
       for (Map<String,Object> old : store.findAll("offerLetter")) if (applicationId.equals(String.valueOf(old.get("applicationId"))) && !id.equals(String.valueOf(old.get("id"))) && "PENDING_CANDIDATE_RESPONSE".equals(String.valueOf(old.get("status")))) { old.put("status", "SUPERSEDED"); store.save("offerLetter", String.valueOf(old.get("id")), old); }
       app.put("offerStatus", "PENDING_CANDIDATE_RESPONSE"); app.put("latestOfferId", id); store.save("application", applicationId, app);
       ra.addFlashAttribute("success", "Offer letter v" + version + " sent to the candidate.");
-    } catch (Exception e) { ra.addFlashAttribute("error", "Could not store the offer letter. Please retry with a file up to 5 MB."); }
+    } catch (Exception e) { ra.addFlashAttribute("error", "Could not store the offer letter. Check the file type and size (maximum 8 MB), then retry."); }
     return "redirect:/hiring/applications/" + applicationId + "/documents";
   }
 
@@ -156,8 +156,14 @@ public class HiringWorkflowController {
   }
   @PostMapping("/admin/site-content") public String saveSiteContent(@RequestParam Map<String,String> form, Authentication auth, RedirectAttributes ra) {
     Map<String,Object> content = new LinkedHashMap<>();
-    for (String key : List.of("founderHeadline", "founderIntro", "founderName", "founderStory", "privacyPolicy", "termsPolicy", "complianceContact")) content.put(key, form.getOrDefault(key, "").trim());
-    content.put("updatedAt", LocalDate.now().toString()); content.put("updatedBy", auth.getName()); store.save("siteContent", "publicPages", content);
+    for (String key : List.of("founderHeadline", "founderIntro", "founderName", "founderStory", "privacyPolicy", "termsPolicy", "complianceContact")) content.put(key, Objects.requireNonNullElse(form.get(key), "").trim());
+    if (String.valueOf(content.get("founderHeadline")).isBlank() || String.valueOf(content.get("founderIntro")).isBlank()
+        || String.valueOf(content.get("founderStory")).isBlank() || String.valueOf(content.get("privacyPolicy")).isBlank()
+        || String.valueOf(content.get("termsPolicy")).isBlank() || String.valueOf(content.get("complianceContact")).isBlank()) {
+      ra.addFlashAttribute("error", "Please complete all required public page fields before saving.");
+      return "redirect:/admin/site-content";
+    }
+    content.put("updatedAt", LocalDate.now().toString()); content.put("updatedBy", auth == null ? "unknown" : auth.getName()); store.save("siteContent", "publicPages", content);
     ra.addFlashAttribute("success", "Founder and compliance page content saved."); return "redirect:/admin/site-content";
   }
 
