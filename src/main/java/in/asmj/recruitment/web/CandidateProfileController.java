@@ -88,6 +88,7 @@ public class CandidateProfileController {
       for (int si=0; si<wb.getNumberOfSheets(); si++) {
         Sheet sheet=wb.getSheetAt(si); if(sheet.getPhysicalNumberOfRows()<2) continue;
         String sheetName=normalizeHeader(sheet.getSheetName());
+        if (sheetName.equals("instructions") || sheetName.equals("readme")) continue;
         Row header=sheet.getRow(0); if(header==null) continue;
         List<Map<String,String>> rows=new ArrayList<>();
         for(int ri=1;ri<=sheet.getLastRowNum();ri++) {
@@ -95,9 +96,11 @@ public class CandidateProfileController {
           Map<String,String> values=new LinkedHashMap<>();
           for(int c=0;c<header.getLastCellNum();c++) {
             String key=normalizeHeader(fmt.formatCellValue(header.getCell(c)));
-            String value=fmt.formatCellValue(row.getCell(c)).trim();
+            String value=readExcelCell(row.getCell(c),fmt,key);
             if(!key.isBlank()) values.put(key,value);
           }
+          String importMarker=values.getOrDefault("importrowclearSampletoimport".toLowerCase(Locale.ROOT), values.getOrDefault("examplerowclearsampletoimport", ""));
+          if ("sample".equalsIgnoreCase(importMarker.trim())) continue;
           if(values.values().stream().anyMatch(v->v!=null&&!v.isBlank())) { rows.add(values); importedRows++; }
         }
         if(rows.isEmpty()) continue;
@@ -144,23 +147,70 @@ public class CandidateProfileController {
   public ResponseEntity<byte[]> template() throws Exception {
     try (Workbook wb=new XSSFWorkbook(); ByteArrayOutputStream out=new ByteArrayOutputStream()) {
       CellStyle head=wb.createCellStyle(); Font font=wb.createFont(); font.setBold(true); head.setFont(font); head.setFillForegroundColor(IndexedColors.LIGHT_CORNFLOWER_BLUE.getIndex()); head.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-      addSheet(wb,"Personal Information",new String[]{"Full Name","Mobile","Alternate Mobile","Current Address","City","State","PIN Code","Current Location","LinkedIn URL","Portfolio URL","Hobbies","Current Role","Desired Role","Highest Qualification","Overall Experience","Professional Summary","Key Skills"},new String[]{"Your Full Name","","","","","","","","","","","","","","e.g. 3 years 6 months","",""},head);
-      addSheet(wb,"Education",new String[]{"Qualification","Institution","Specialization","Grade","Start Month","End Month","Details"},new String[]{"B.Tech","Example University","Computer Science","80%","2019-07","2023-06","Awards or achievements"},head);
-      addSheet(wb,"Projects",new String[]{"Project Title","Role","Start Month","End Month","Currently Working","Technologies","Description","Project URL"},new String[]{"Sample project","Developer","2024-01","","Yes","Java, Spring Boot, MongoDB","Briefly describe your contribution","https://example.com"},head);
-      addSheet(wb,"Technology Experience",new String[]{"Technology","Level","Years","Months","Last Used / Notes"},new String[]{"Java","Advanced","3","6","Used in current project"},head);
-      addSheet(wb,"Languages",new String[]{"Language","Proficiency"},new String[]{"English","Professional"},head);
-      addSheet(wb,"Employment",new String[]{"Company","Job Title","Start Month","End Month","Responsibilities","Achievements"},new String[]{"Example Company","Software Developer","2023-07","Present","Describe your responsibilities","Describe measurable results"},head);
-      addSheet(wb,"Certifications & Other",new String[]{"Certification Name","Issuing Body","Year","Additional Information","Awards"},new String[]{"Example certification","Issuing organization","2024","Volunteering, publications, etc.","Award name"},head);
+      CellStyle sampleStyle=wb.createCellStyle(); sampleStyle.setFillForegroundColor(IndexedColors.LIGHT_YELLOW.getIndex()); sampleStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+      addSheet(wb,"Personal Information",new String[]{"Full Name","Mobile","Alternate Mobile","Current Address","City","State","PIN Code","Current Location","LinkedIn URL","Portfolio URL","Hobbies","Current Role","Desired Role","Highest Qualification","Overall Experience","Professional Summary","Key Skills"},new String[]{"SAMPLE - Rahul Sharma","9876543210","9123456780","12 Example Road, Unit 4","Bhubaneswar","Odisha","751001","Bhubaneswar, Odisha","https://linkedin.com/in/rahul-sharma","https://github.com/rahulsharma","Reading, badminton, travel","Software Developer","Java Developer","B.Tech Computer Science","3 years 6 months","Software developer experienced in Java, Spring Boot and REST APIs.","Java, Spring Boot, REST API, MongoDB"},head,sampleStyle);
+      addSheet(wb,"Education",new String[]{"Qualification","Institution","Specialization","Grade","Start Month","End Month","Details"},new String[]{"SAMPLE - B.Tech","Example University","Computer Science","8.2 CGPA","2019-07","2023-06","Final-year project on inventory management"},head,sampleStyle);
+      addSheet(wb,"Projects",new String[]{"Project Title","Role","Start Month","End Month","Currently Working","Technologies","Description","Project URL"},new String[]{"SAMPLE - Inventory Portal","Backend Developer","2024-01","2024-10","No","Java, Spring Boot, MongoDB","Built REST APIs, authentication and reporting features.","https://example.com/inventory"},head,sampleStyle);
+      addSheet(wb,"Technology Experience",new String[]{"Technology","Level","Years","Months","Last Used / Notes"},new String[]{"SAMPLE - Java","Advanced","3","6","Used in current role; last used in 2026"},head,sampleStyle);
+      addSheet(wb,"Languages",new String[]{"Language","Proficiency"},new String[]{"SAMPLE - English","Professional"},head,sampleStyle);
+      addSheet(wb,"Employment",new String[]{"Company","Job Title","Start Month","End Month","Responsibilities","Achievements"},new String[]{"SAMPLE - Example Technologies Pvt Ltd","Software Developer","2023-07","Present","Develop and maintain Spring Boot services and APIs.","Improved API response time and added automated tests."},head,sampleStyle);
+      addSheet(wb,"Certifications & Other",new String[]{"Certification Name","Issuing Body","Year","Additional Information","Awards"},new String[]{"SAMPLE - Java Programming Certificate","Example Training Institute","2024","Volunteer mentor; contributed to internal technical documentation.","Quarterly Star Performer"},head,sampleStyle);
+      addInstructionsSheet(wb,head);
       wb.write(out);
       return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=ASMJ_Detailed_Candidate_Profile_Template.xlsx").contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).body(out.toByteArray());
     }
   }
 
-  private void addSheet(Workbook wb,String name,String[] headers,String[] sample,CellStyle head) {
+  private void addSheet(Workbook wb,String name,String[] headers,String[] sample,CellStyle head,CellStyle sampleStyle) {
     Sheet sheet=wb.createSheet(name); Row h=sheet.createRow(0);
     for(int i=0;i<headers.length;i++){Cell cell=h.createCell(i);cell.setCellValue(headers[i]);cell.setCellStyle(head);sheet.setColumnWidth(i,Math.min(16000,Math.max(4200,headers[i].length()*420)));}
-    sheet.createRow(1); // Keep the first data row blank so example text cannot accidentally be imported as candidate information.
-    sheet.createFreezePane(0,1); sheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(0,Math.max(1,sheet.getLastRowNum()),0,headers.length-1));
+    Cell markerHeader=h.createCell(headers.length); markerHeader.setCellValue("Import Row - clear SAMPLE to import"); markerHeader.setCellStyle(head); sheet.setColumnWidth(headers.length,7800);
+    Row example=sheet.createRow(1);
+    for(int i=0;i<headers.length;i++){Cell cell=example.createCell(i);cell.setCellValue(i<sample.length?sample[i]:"");cell.setCellStyle(sampleStyle);}
+    Cell marker=example.createCell(headers.length); marker.setCellValue("SAMPLE"); marker.setCellStyle(sampleStyle);
+    sheet.createFreezePane(0,1); sheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(0,1,0,headers.length));
+  }
+
+  private void addInstructionsSheet(Workbook wb,CellStyle head) {
+    Sheet sheet=wb.createSheet("Instructions");
+    String[][] rows={
+      {"ASMJ Recruitment - Excel profile import","Instructions"},
+      {"1. Sample rows","Yellow rows are examples only. Replace the example values and clear the SAMPLE marker in the last column to import that row, or delete the sample row."},
+      {"2. Add multiple records","Education, Projects, Technology Experience, Languages and Employment support multiple rows. Copy the header format and add one record per row. Leave the marker column blank for real rows."},
+      {"3. Month/year format","Enter start and end months as YYYY-MM, for example 2023-07. Excel date cells are also accepted and normalized to YYYY-MM."},
+      {"4. Current project/job","For a current project, set Currently Working to Yes and leave End Month blank. For current employment, enter Present in End Month."},
+      {"5. Personal Information","Use one row only. Replace sample name, phone, address, experience, summary and skills with your own details."},
+      {"6. Import process","Upload the completed .xlsx workbook from Candidate Profile. Review imported data on the profile page and click Save Profile."},
+      {"7. Privacy","Do not include passwords, identity document numbers or other information not required for your resume."}
+    };
+    for(int r=0;r<rows.length;r++){Row row=sheet.createRow(r);for(int c=0;c<2;c++){Cell cell=row.createCell(c);cell.setCellValue(rows[r][c]);if(r==0)cell.setCellStyle(head);}}
+    sheet.setColumnWidth(0,8000);sheet.setColumnWidth(1,22000);sheet.createFreezePane(0,1);
+  }
+
+  private String readExcelCell(Cell cell,DataFormatter formatter,String headerKey) {
+    if(cell==null) return "";
+    if(DateUtil.isCellDateFormatted(cell) && (headerKey.contains("month") || headerKey.contains("date"))) {
+      try { return DateUtil.getLocalDateTime(cell.getNumericCellValue()).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM")); }
+      catch(Exception ignored) { }
+    }
+    String value=formatter.formatCellValue(cell).trim();
+    if(value.isBlank() || !(headerKey.contains("month") || headerKey.contains("date"))) return value;
+    return normalizeMonth(value);
+  }
+
+  private String normalizeMonth(String value) {
+    String v=value.trim();
+    if(v.isBlank() || v.equalsIgnoreCase("present") || v.equalsIgnoreCase("current") || v.equalsIgnoreCase("ongoing")) return v.equalsIgnoreCase("current") || v.equalsIgnoreCase("ongoing") ? "Present" : v;
+    java.util.regex.Matcher ym=java.util.regex.Pattern.compile("^(\\d{4})[-/](\\d{1,2})(?:[-/]\\d{1,2})?$").matcher(v);
+    if(ym.matches()) return String.format(Locale.ROOT,"%s-%02d",ym.group(1),Integer.parseInt(ym.group(2)));
+    java.util.regex.Matcher my=java.util.regex.Pattern.compile("^(\\d{1,2})[-/](\\d{4})$").matcher(v);
+    if(my.matches()) return String.format(Locale.ROOT,"%s-%02d",my.group(2),Integer.parseInt(my.group(1)));
+    for(String pattern:List.of("MMM-yyyy","MMMM yyyy","MMM-yy","MM/yyyy","M/yyyy")) {
+      try { java.time.YearMonth month=java.time.YearMonth.parse(v,java.time.format.DateTimeFormatter.ofPattern(pattern,Locale.ENGLISH)); return month.toString(); }
+      catch(Exception ignored) { }
+    }
+    try { return java.time.LocalDate.parse(v).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM")); } catch(Exception ignored) { }
+    return v;
   }
 
   private Map<String,Object> pick(Map<String,String> row,Map<String,String> mapping) {
