@@ -6,6 +6,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.UserDetailsManager;
+import org.springframework.beans.factory.ObjectProvider;
+import in.asmj.recruitment.service.MeetingNotificationService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +20,10 @@ public class RecruitmentController {
   private final RecordStore store;
   private final UserDetailsManager users;
   private final PasswordEncoder passwordEncoder;
+  private final ObjectProvider<MeetingNotificationService> meetingNotifications;
 
-  public RecruitmentController(RecordStore store, UserDetailsManager users, PasswordEncoder passwordEncoder) {
-    this.store = store; this.users = users; this.passwordEncoder = passwordEncoder;
+  public RecruitmentController(RecordStore store, UserDetailsManager users, PasswordEncoder passwordEncoder, ObjectProvider<MeetingNotificationService> meetingNotifications) {
+    this.store = store; this.users = users; this.passwordEncoder = passwordEncoder; this.meetingNotifications = meetingNotifications;
   }
 
   @GetMapping("/") public String home(Model m) {
@@ -305,15 +308,85 @@ public class RecruitmentController {
     m.addAttribute("jobs",store.findAll("job").stream().filter(j -> !"CLOSED".equalsIgnoreCase(String.valueOf(j.get("status")))).toList());
     return "interviews";
   }
-  @PostMapping("/interviews/save") public String saveInterview(@RequestParam Map<String,String> form,RedirectAttributes ra) {
-    Optional<Map<String,Object>> candidate = store.find("candidate", form.getOrDefault("candidateId", ""));
-    Optional<Map<String,Object>> job = store.find("job", form.getOrDefault("jobId", ""));
-    if (candidate.isEmpty() || job.isEmpty()) { ra.addFlashAttribute("error", "Select a valid candidate and job from the dropdowns."); return "redirect:/interviews"; }
-    String id=newId(); Map<String,Object> r=new LinkedHashMap<>(form);
-    r.put("candidateName", candidate.get().get("fullName")); r.put("email", candidate.get().get("email"));
-    r.put("jobTitle", job.get().get("title")); r.put("company", job.get().get("company"));
-    r.remove("candidateId"); r.remove("jobId"); r.put("id",id); r.put("status","SCHEDULED");
-    store.save("interview",id,r); ra.addFlashAttribute("success","Interview scheduled for the selected candidate and job."); return "redirect:/interviews";
+  @PostMapping("/interviews/save")
+  public String saveInterview(
+      @RequestParam(value="candidateIds", required=false) List<String> candidateIds,
+      @RequestParam(value="candidateId", required=false) String legacyCandidateId,
+      @RequestParam String jobId,
+      @RequestParam String interviewer,
+      @RequestParam String scheduledAt,
+      @RequestParam String interviewType,
+      @RequestParam(value="meetingUrl", required=false) String suppliedMeetingUrl,
+      @RequestParam(value="notes", required=false) String notes,
+      Authentication auth, RedirectAttributes ra) {
+    List<String> selectedIds = new ArrayList<>();
+    if (candidateIds != null) selectedIds.addAll(candidateIds);
+    if (selectedIds.isEmpty() && legacyCandidateId != null && !legacyCandidateId.isBlank()) selectedIds.add(legacyCandidateId);
+    selectedIds = selectedIds.stream().filter(Objects::nonNull).map(String::trim).filter(x -> !x.isBlank()).distinct().toList();
+    Optional<Map<String,Object>> jobOpt = store.find("job", jobId);
+    if (selectedIds.isEmpty() || jobOpt.isEmpty()) {
+      ra.addFlashAttribute("error", "Select at least one candidate and a valid job opening.");
+      return "redirect:/interviews";
+    }
+    String provider = interviewType == null ? "Google Meet" : interviewType.trim();
+    boolean online = "Google Meet".equals(provider) || "Microsoft Teams".equals(provider);
+    String meetingUrl = suppliedMeetingUrl == null ? "" : suppliedMeetingUrl.trim();
+    if (online && !validMeetingUrl(provider, meetingUrl)) {
+      ra.addFlashAttribute("error", "Enter a valid HTTPS " + provider + " meeting link before notifying participants.");
+      return "redirect:/interviews";
+    }
+    if (!online) meetingUrl = "";
+    Map<String,Object> job = jobOpt.get();
+    String groupId = UUID.randomUUID().toString().replace("-", "");
+    int notified = 0;
+    int emailSent = 0;
+    List<String> invalidCandidates = new ArrayList<>();
+    for (String selectedId : selectedIds) {
+      Optional<Map<String,Object>> candidateOpt = store.find("candidate", selectedId);
+      if (candidateOpt.isEmpty()) { invalidCandidates.add(selectedId); continue; }
+      Map<String,Object> candidate = candidateOpt.get();
+      String email = String.valueOf(candidate.getOrDefault("email", "")).trim();
+      if (email.isBlank() || !email.contains("@")) { invalidCandidates.add(String.valueOf(candidate.getOrDefault("fullName", selectedId))); continue; }
+      String id = UUID.randomUUID().toString().replace("-", "");
+      Map<String,Object> r = new LinkedHashMap<>();
+      r.put("id", id); r.put("groupMeetingId", groupId);
+      r.put("candidateId", candidate.getOrDefault("id", selectedId));
+      r.put("jobId", job.getOrDefault("id", jobId)); r.put("candidateName", candidate.getOrDefault("fullName", "Candidate"));
+      r.put("email", email); r.put("jobTitle", job.getOrDefault("title", "Interview")); r.put("company", job.getOrDefault("company", ""));
+      r.put("interviewer", interviewer.trim()); r.put("scheduledAt", scheduledAt);
+      r.put("interviewType", provider); r.put("meetingProvider", online ? provider : "");
+      r.put("notes", notes == null ? "" : notes.trim()); r.put("meetingUrl", meetingUrl); r.put("status", "SCHEDULED");
+      r.put("createdBy", auth == null ? "" : auth.getName()); r.put("createdAt", java.time.Instant.now().toString());
+      store.save("interview", id, r);
+      String notificationId = newId(); Map<String,Object> n = new LinkedHashMap<>();
+      n.put("id", notificationId); n.put("candidateEmail", email); n.put("interviewId", id); n.put("groupMeetingId", groupId); n.put("type", "INTERVIEW_SCHEDULED");
+      n.put("message", "An interview has been scheduled for " + r.get("jobTitle") + " on " + scheduledAt + (meetingUrl.isBlank() ? "." : ". Join via " + provider + ": " + meetingUrl));
+      n.put("meetingUrl", meetingUrl); n.put("meetingProvider", provider); n.put("scheduledAt", scheduledAt); n.put("createdAt", java.time.Instant.now().toString()); n.put("read", false);
+      store.save("notification", notificationId, n);
+      notified++;
+      if (meetingNotifications.getIfAvailable() != null && meetingNotifications.getIfAvailable().sendInterviewInvite(r)) emailSent++;
+    }
+    if (notified == 0) {
+      ra.addFlashAttribute("error", "No invitations were created. Check that the selected candidates exist and have valid email addresses.");
+    } else {
+      String msg = "Interview invitation saved for " + notified + " participant(s).";
+      if (emailSent > 0) msg += " Email sent to " + emailSent + " participant(s).";
+      else msg += " Portal notifications are available; email delivery is not confirmed. Configure SMTP if email notifications are required.";
+      if (!invalidCandidates.isEmpty()) msg += " Skipped " + invalidCandidates.size() + " invalid candidate selection(s).";
+      ra.addFlashAttribute("success", msg);
+    }
+    return "redirect:/interviews";
+  }
+
+  private boolean validMeetingUrl(String provider, String value) {
+    try {
+      java.net.URI uri = java.net.URI.create(value);
+      if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) return false;
+      String host = uri.getHost().toLowerCase(Locale.ROOT);
+      if ("Google Meet".equals(provider)) return host.equals("meet.google.com");
+      if ("Microsoft Teams".equals(provider)) return host.equals("teams.microsoft.com") || host.equals("teams.live.com");
+      return false;
+    } catch (Exception ex) { return false; }
   }
   @GetMapping("/placements") public String placements(Model m) {
     m.addAttribute("records",store.findAll("placement"));
@@ -335,7 +408,14 @@ public class RecruitmentController {
     r.put("id",id); r.put("status","PLACED"); r.put("placedAt",LocalDate.now().toString()); store.save("placement",id,r); ra.addFlashAttribute("success","Placement recorded for the selected candidate, employer and job."); return "redirect:/placements";
   }
   @GetMapping("/reports") public String reports(Model m) { m.addAttribute("candidates",store.count("candidate")); m.addAttribute("employers",store.count("employer")); m.addAttribute("jobs",store.count("job")); m.addAttribute("applications",store.count("application")); m.addAttribute("interviews",store.count("interview")); m.addAttribute("placements",store.count("placement")); return "reports"; }
-  @GetMapping("/portal") public String portal(Authentication auth,Model m) { m.addAttribute("username",auth.getName()); m.addAttribute("applications",store.findAll("application").stream().filter(a -> auth.getName().equals(a.get("email"))).toList()); return "portal"; }
+  @GetMapping("/portal") public String portal(Authentication auth,Model m) {
+    String email = auth.getName();
+    m.addAttribute("username", email);
+    m.addAttribute("applications",store.findAll("application").stream().filter(a -> email.equalsIgnoreCase(String.valueOf(a.get("email")))).toList());
+    m.addAttribute("interviews", store.findAll("interview").stream().filter(i -> email.equalsIgnoreCase(String.valueOf(i.get("email"))) && !"CANCELLED".equalsIgnoreCase(String.valueOf(i.get("status")))).toList());
+    m.addAttribute("notifications", store.findAll("notification").stream().filter(n -> email.equalsIgnoreCase(String.valueOf(n.get("candidateEmail"))) && "INTERVIEW_SCHEDULED".equals(String.valueOf(n.get("type")))).toList());
+    return "portal";
+  }
   private Object firstNonBlank(Object... values) {
     for (Object value : values) if (value != null && !String.valueOf(value).isBlank() && !"null".equals(String.valueOf(value))) return value;
     return "";

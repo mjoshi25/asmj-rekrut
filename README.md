@@ -129,14 +129,15 @@ Recruiter candidate search supports experience filters such as `3` (3 years up t
 ## Hiring workflow (added 17 October 2026)
 
 - When an authorized employer or recruiter changes an application status to `HIRED`, the candidate gets an in-app hiring notification and a joining-document request on **Hiring & offers** (`/candidate/hiring`).
-- Candidates can upload joining documents (PDF, PNG, JPG/JPEG, DOC/DOCX; 5 MB maximum per file). Employers and explicitly authorized recruiters can review documents and mark them verified or request a re-upload.
+- Candidates can upload joining documents (PDF, PNG, JPG/JPEG, DOC/DOCX; 8 MB maximum per file). Employers and explicitly authorized recruiters can review documents and mark them verified or request a re-upload.
 - Employers can upload an offer letter with salary/CTC, joining date and optional notes. Candidates can accept the current version or request a revision with comments. Every new upload creates a version; a previous pending version is marked superseded.
-- Private files are stored under `ASMJ_UPLOAD_DIR` (default `./data/private-uploads`) in `candidates/{candidateId}/{applicationId}/documents` and `offers`. Downloads are served through authenticated controller routes, not public static URLs.
+- New offer letters and joining documents are stored in Cloudinary as authenticated raw assets under candidate/application folders. Downloads are authorized by the application before generating a signed Cloudinary URL. `ASMJ_UPLOAD_DIR` is retained only for legacy local files.
 - Public **Founder** (`/founder`) and **Compliance** (`/compliance`) pages are linked in the main navigation. Compliance text is a starter draft and should be legally reviewed before production publication.
 
 ### Production storage note
 
-On Render or another container host, configure `ASMJ_UPLOAD_DIR` to a mounted persistent disk path (for example `/var/data/private-uploads`) and mount the disk at that path. The default local directory is not durable across ephemeral deployments/restarts. Back up private uploaded files and the database together, restrict disk access, and define an approved retention/deletion policy.
+Configure `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in Render. A persistent Render disk is not needed for new offer-letter or joining-document uploads. See `DEPLOYMENT-NOTES.md` for details.
+
 - Administrators can edit the Founder and Compliance public-page content at `/admin/site-content`; changes are persisted in the configured record store. Founder name remains blank until ASMJ confirms the official details.
 
 ## Demo data added in this update
@@ -148,3 +149,13 @@ On startup, the application idempotently creates a demo employer account and six
 - Admin login from the existing setup: `admin@asmj.co.in` / `Admin@123`
 
 Change all demo credentials before production use. The seeder does not reset the password of an existing account and does not overwrite seeded job records once created. The administrator dashboard includes a setup checklist covering registrations, job review, private upload persistence, and policy publication.
+
+## Google Meet / Microsoft Teams interview invitations
+
+- Open **Interviews** as an admin, employer or recruiter. Select one or more candidates, choose the job and provider, set the date/time, and paste a meeting URL you created in Google Meet or Microsoft Teams.
+- The app validates that Google Meet links use `meet.google.com` and Teams links use `teams.microsoft.com` or `teams.live.com`. It saves a candidate-specific interview record and in-app notification for each participant, all linked to the same meeting group.
+- The app does not create meetings inside Google or Microsoft automatically. That requires separately configured Google Calendar/Meet or Microsoft Graph OAuth/API integration.
+- Email invitations are optional and disabled by default. To enable, set `ASMJ_MAIL_ENABLED=true` and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_AUTH` and `SMTP_STARTTLS` in the deployment environment. Use SMTP credentials from your email provider; do not commit secrets to Git.
+
+### Offer letters and joining documents storage
+New offer letters and joining documents use the configured Cloudinary account as authenticated raw assets. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in Render. `ASMJ_UPLOAD_DIR` is only retained for backward compatibility with legacy local files. See `DEPLOYMENT-NOTES.md` for details.

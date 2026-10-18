@@ -1,13 +1,16 @@
 package in.asmj.recruitment.web;
 
 import in.asmj.recruitment.store.RecordStore;
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -20,10 +23,22 @@ import java.util.*;
 
 @Controller
 public class HiringWorkflowController {
+  private static final Logger log = LoggerFactory.getLogger(HiringWorkflowController.class);
   private final RecordStore store;
-  private final Path uploadRoot;
-  public HiringWorkflowController(RecordStore store, @Value("${asmj.upload-dir:./data/private-uploads}") String uploadDir) {
-    this.store = store; this.uploadRoot = Paths.get(uploadDir).toAbsolutePath().normalize();
+  private final Path uploadRoot; // Used only for backwards-compatible downloads of older local files.
+  private final String cloudName, cloudKey, cloudSecret;
+  public HiringWorkflowController(RecordStore store,
+      @Value("${asmj.upload-dir:./data/private-uploads}") String uploadDir,
+      @Value("${cloudinary.cloud-name:}") String cloudName,
+      @Value("${cloudinary.api-key:}") String cloudKey,
+      @Value("${cloudinary.api-secret:}") String cloudSecret) {
+    this.store = store;
+    String effectiveUploadDir = uploadDir == null || uploadDir.isBlank() ? "./data/private-uploads" : uploadDir.trim();
+    this.uploadRoot = Paths.get(effectiveUploadDir).toAbsolutePath().normalize();
+    this.cloudName = Objects.requireNonNullElse(cloudName, "").trim();
+    this.cloudKey = Objects.requireNonNullElse(cloudKey, "").trim();
+    this.cloudSecret = Objects.requireNonNullElse(cloudSecret, "").trim();
+    log.info("Recruitment document storage configured: Cloudinary {}", cloudConfigured() ? "credentials present" : "NOT CONFIGURED");
   }
 
   @GetMapping("/candidate/hiring")
@@ -48,16 +63,13 @@ public class HiringWorkflowController {
     if (!Set.of(".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx").contains(uploadExt)) { ra.addFlashAttribute("error", "Allowed document formats: PDF, PNG, JPG, DOC or DOCX."); return "redirect:/candidate/hiring"; }
     if (!Set.of("Resume / CV", "Government ID", "Address Proof", "Education Certificate", "Experience Letter", "Relieving Letter", "Photograph", "Bank Details", "Other").contains(safeType)) { ra.addFlashAttribute("error", "Choose a valid document type."); return "redirect:/candidate/hiring"; }
     try {
+      ensureCloudinaryConfigured();
       String id = id(); String original = Paths.get(Objects.requireNonNullElse(file.getOriginalFilename(), "document")).getFileName().toString();
-      String ext = original.contains(".") ? original.substring(original.lastIndexOf('.')).replaceAll("[^.A-Za-z0-9]", "") : "";
-      Path dir = uploadRoot.resolve("candidates").resolve(safeSegment(String.valueOf(app.get("candidateId")))).resolve(safeSegment(applicationId)).resolve("documents").normalize();
-      Files.createDirectories(dir); Path destination = dir.resolve(id + ext).normalize();
-      if (!destination.startsWith(uploadRoot)) throw new IOException("Invalid upload path");
-      file.transferTo(destination);
-      Map<String,Object> d = new LinkedHashMap<>(); d.put("id", id); d.put("applicationId", applicationId); d.put("candidateId", app.getOrDefault("candidateId", "")); d.put("candidateEmail", auth.getName()); d.put("candidateName", app.get("fullName")); d.put("documentType", safeType); d.put("originalFilename", original); d.put("storedPath", destination.toString()); d.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); d.put("size", file.getSize()); d.put("uploadedAt", LocalDate.now().toString()); d.put("reviewStatus", "PENDING_REVIEW"); store.save("candidateDocument", id, d);
+      Map<String,Object> cloud = uploadPrivateFile(file, "asmj-recruitment/candidates/" + safeSegment(String.valueOf(app.get("candidateId"))) + "/" + safeSegment(applicationId) + "/documents", id + "-" + safeCloudinaryFilename(original));
+      Map<String,Object> d = new LinkedHashMap<>(); d.put("id", id); d.put("applicationId", applicationId); d.put("candidateId", app.getOrDefault("candidateId", "")); d.put("candidateEmail", auth.getName()); d.put("candidateName", app.get("fullName")); d.put("documentType", safeType); d.put("originalFilename", original); d.put("storageProvider", "CLOUDINARY"); d.put("cloudinaryPublicId", cloud.get("public_id")); d.put("cloudinaryResourceType", "raw"); d.put("cloudinaryDeliveryType", "authenticated"); d.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); d.put("size", file.getSize()); d.put("uploadedAt", LocalDate.now().toString()); d.put("reviewStatus", "PENDING_REVIEW"); store.save("candidateDocument", id, d);
       app.put("documentRequestStatus", "UPLOADED"); store.save("application", applicationId, app);
       ra.addFlashAttribute("success", "Document uploaded securely. The employer can review it from the application workflow.");
-    } catch (Exception e) { ra.addFlashAttribute("error", "Upload failed. Please retry with a file up to 5 MB."); }
+    } catch (Exception e) { log.error("Joining-document upload failed for application {} during Cloudinary upload", applicationId, e); ra.addFlashAttribute("error", "Upload failed: " + uploadFailureReason(e) + ". Check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in Render."); }
     return "redirect:/candidate/hiring";
   }
 
@@ -80,15 +92,15 @@ public class HiringWorkflowController {
     String offerExt = extension(Objects.requireNonNullElse(file.getOriginalFilename(), "")).toLowerCase(Locale.ROOT);
     if (!Set.of(".pdf", ".doc", ".docx").contains(offerExt)) { ra.addFlashAttribute("error", "Offer letters must be PDF, DOC or DOCX files."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
     try {
+      ensureCloudinaryConfigured();
       int version = (int) store.findAll("offerLetter").stream().filter(o -> applicationId.equals(String.valueOf(o.get("applicationId")))).count() + 1;
       String id = id(); String original = Paths.get(Objects.requireNonNullElse(file.getOriginalFilename(), "offer.pdf")).getFileName().toString();
-      Path dir = uploadRoot.resolve("candidates").resolve(safeSegment(String.valueOf(app.get("candidateId")))).resolve(safeSegment(applicationId)).resolve("offers").normalize(); Files.createDirectories(dir);
-      Path destination = dir.resolve(id + extension(original)).normalize(); if (!destination.startsWith(uploadRoot)) throw new IOException("Invalid path"); file.transferTo(destination);
-      Map<String,Object> offer = new LinkedHashMap<>(); offer.put("id", id); offer.put("applicationId", applicationId); offer.put("candidateId", app.getOrDefault("candidateId", "")); offer.put("candidateEmail", app.get("email")); offer.put("employerEmail", auth.getName()); offer.put("version", version); offer.put("originalFilename", original); offer.put("storedPath", destination.toString()); offer.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); offer.put("salary", Objects.requireNonNullElse(salary, "")); offer.put("joiningDate", Objects.requireNonNullElse(joiningDate, "")); offer.put("notes", Objects.requireNonNullElse(notes, "")); offer.put("status", "PENDING_CANDIDATE_RESPONSE"); offer.put("uploadedAt", LocalDate.now().toString()); store.save("offerLetter", id, offer);
+      Map<String,Object> cloud = uploadPrivateFile(file, "asmj-recruitment/candidates/" + safeSegment(String.valueOf(app.get("candidateId"))) + "/" + safeSegment(applicationId) + "/offers", id + "-" + safeCloudinaryFilename(original));
+      Map<String,Object> offer = new LinkedHashMap<>(); offer.put("id", id); offer.put("applicationId", applicationId); offer.put("candidateId", app.getOrDefault("candidateId", "")); offer.put("candidateEmail", app.get("email")); offer.put("employerEmail", auth.getName()); offer.put("version", version); offer.put("originalFilename", original); offer.put("storageProvider", "CLOUDINARY"); offer.put("cloudinaryPublicId", cloud.get("public_id")); offer.put("cloudinaryResourceType", "raw"); offer.put("cloudinaryDeliveryType", "authenticated"); offer.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); offer.put("salary", Objects.requireNonNullElse(salary, "")); offer.put("joiningDate", Objects.requireNonNullElse(joiningDate, "")); offer.put("notes", Objects.requireNonNullElse(notes, "")); offer.put("status", "PENDING_CANDIDATE_RESPONSE"); offer.put("uploadedAt", LocalDate.now().toString()); store.save("offerLetter", id, offer);
       for (Map<String,Object> old : store.findAll("offerLetter")) if (applicationId.equals(String.valueOf(old.get("applicationId"))) && !id.equals(String.valueOf(old.get("id"))) && "PENDING_CANDIDATE_RESPONSE".equals(String.valueOf(old.get("status")))) { old.put("status", "SUPERSEDED"); store.save("offerLetter", String.valueOf(old.get("id")), old); }
       app.put("offerStatus", "PENDING_CANDIDATE_RESPONSE"); app.put("latestOfferId", id); store.save("application", applicationId, app);
       ra.addFlashAttribute("success", "Offer letter v" + version + " sent to the candidate.");
-    } catch (Exception e) { ra.addFlashAttribute("error", "Could not store the offer letter. Check the file type and size (maximum 8 MB), then retry."); }
+    } catch (Exception e) { log.error("Offer-letter upload failed for application {} during Cloudinary upload", applicationId, e); ra.addFlashAttribute("error", "Could not store the offer letter: " + uploadFailureReason(e) + ". Check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in Render; file limit is 8 MB."); }
     return "redirect:/hiring/applications/" + applicationId + "/documents";
   }
 
@@ -123,9 +135,25 @@ public class HiringWorkflowController {
     boolean allowed = auth != null && (auth.getName().equalsIgnoreCase(String.valueOf(file.get("candidateEmail"))) || ("offerLetter".equals(type) && auth.getName().equalsIgnoreCase(String.valueOf(file.get("employerEmail")))));
     if (!allowed && auth != null) { Map<String,Object> app = application(String.valueOf(file.get("applicationId"))); allowed = canEmployerAccess(app, auth); }
     if (!allowed) { response.sendError(403); return; }
-    Path path = Paths.get(String.valueOf(file.get("storedPath"))).toAbsolutePath().normalize();
+    response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + String.valueOf(file.get("originalFilename")).replaceAll("[\"\\r\\n]", "") + "\"");
+    if ("CLOUDINARY".equalsIgnoreCase(String.valueOf(file.get("storageProvider")))) {
+      try {
+        ensureCloudinaryConfigured();
+        String publicId = String.valueOf(file.get("cloudinaryPublicId"));
+        String signedUrl = cloudinary().url().resourceType("raw").type("authenticated").signed(true).generate(publicId);
+        response.sendRedirect(signedUrl);
+      } catch (Exception ex) {
+        log.error("Could not generate authenticated Cloudinary download URL for {} {}", type, id, ex);
+        response.sendError(502, "Document storage is temporarily unavailable. Please try again later.");
+      }
+      return;
+    }
+    // Backwards compatibility for documents uploaded before Cloudinary storage was enabled.
+    Object storedPath = file.get("storedPath");
+    if (storedPath == null || String.valueOf(storedPath).isBlank()) { response.sendError(404); return; }
+    Path path = Paths.get(String.valueOf(storedPath)).toAbsolutePath().normalize();
     if (!path.startsWith(uploadRoot) || !Files.isRegularFile(path)) { response.sendError(404); return; }
-    response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE); response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + String.valueOf(file.get("originalFilename")).replaceAll("[\"\\r\\n]", "") + "\""); Files.copy(path, response.getOutputStream());
+    response.setContentType("application/octet-stream"); Files.copy(path, response.getOutputStream());
   }
 
   @GetMapping("/founder") public String founder(Model model) {
@@ -167,6 +195,27 @@ public class HiringWorkflowController {
     ra.addFlashAttribute("success", "Founder and compliance page content saved."); return "redirect:/admin/site-content";
   }
 
+  private boolean cloudConfigured() { return !cloudName.isBlank() && !cloudKey.isBlank() && !cloudSecret.isBlank(); }
+  private void ensureCloudinaryConfigured() {
+    if (!cloudConfigured()) throw new IllegalStateException("Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in Render environment variables.");
+  }
+  private Cloudinary cloudinary() {
+    ensureCloudinaryConfigured();
+    return new Cloudinary(ObjectUtils.asMap("cloud_name", cloudName, "api_key", cloudKey, "api_secret", cloudSecret, "secure", true));
+  }
+  @SuppressWarnings("unchecked")
+  private Map<String,Object> uploadPrivateFile(MultipartFile file, String folder, String publicId) throws Exception {
+    Map<String,Object> result = cloudinary().uploader().upload(file.getBytes(), ObjectUtils.asMap(
+        "folder", folder, "public_id", publicId, "resource_type", "raw", "type", "authenticated", "overwrite", false));
+    if (result.get("public_id") == null) throw new IOException("Cloudinary did not return a public ID for the uploaded file");
+    log.info("Recruitment file uploaded to Cloudinary: folder={}, publicId={}, bytes={}", folder, result.get("public_id"), file.getSize());
+    return result;
+  }
+  private String safeCloudinaryFilename(String original) {
+    String safe = Objects.requireNonNullElse(original, "document").replaceAll("[^A-Za-z0-9._-]", "_");
+    if (safe.isBlank() || safe.equals(".") || safe.equals("..")) return "document";
+    return safe.length() > 100 ? safe.substring(safe.length() - 100) : safe;
+  }
   private List<Map<String,Object>> candidateApps(String email) { return store.findAll("application").stream().filter(a -> email.equalsIgnoreCase(String.valueOf(a.get("email")))).toList(); }
   private Map<String,Object> application(String id) { return store.find("application", id).orElseThrow(() -> new NoSuchElementException("Application not found")); }
   private boolean isCandidateOwner(Map<String,Object> app, Authentication auth) { return auth != null && auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_CANDIDATE")) && auth.getName().equalsIgnoreCase(String.valueOf(app.get("email"))); }
@@ -180,5 +229,13 @@ public class HiringWorkflowController {
   private String deny(RedirectAttributes ra, String target) { ra.addFlashAttribute("error", "You are not authorized to perform this action."); return "redirect:" + target; }
   private String id() { return UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT); }
   private String safeSegment(String value) { return value == null ? "unknown" : value.replaceAll("[^A-Za-z0-9_-]", "_"); }
+  private String uploadFailureReason(Exception ex) {
+    Throwable root = ex;
+    while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+    String message = root.getMessage();
+    if (message == null || message.isBlank()) message = root.getClass().getSimpleName();
+    message = message.replaceAll("[\\r\\n]", " ").trim();
+    return message.length() > 180 ? message.substring(0, 180) : message;
+  }
   private String extension(String name) { int i = name.lastIndexOf('.'); return i >= 0 ? name.substring(i).replaceAll("[^.A-Za-z0-9]", "") : ""; }
 }
