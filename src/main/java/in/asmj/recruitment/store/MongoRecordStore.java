@@ -12,14 +12,14 @@ public class MongoRecordStore implements RecordStore {
   private final MongoTemplate mongo;
   public MongoRecordStore(MongoTemplate mongo){this.mongo=mongo;}
   public Map<String,Object> save(String type,String id,Map<String,Object> payload){
-    Map<String,Object> doc=new LinkedHashMap<>(payload);doc.put("_id",type+":"+id);doc.put("recordType",type);doc.put("recordId",id);
+    Map<String,Object> doc=new LinkedHashMap<>(payload);doc.putIfAbsent("id",id);doc.put("_id",type+":"+id);doc.put("recordType",type);doc.put("recordId",id);
     mongo.save(doc,"app_records");doc.remove("_id");doc.remove("recordType");doc.remove("recordId");return doc;
   }
   public Optional<Map<String,Object>> find(String type,String id){
-    Map doc=mongo.findById(type+":"+id,Map.class,"app_records");if(doc==null)return Optional.empty();return Optional.of(clean(doc));
+    Map doc=mongo.findById(type+":"+id,Map.class,"app_records");if(doc==null)return Optional.empty();Map<String,Object> cleaned=clean(doc);cleaned.putIfAbsent("id",id);return Optional.of(cleaned);
   }
   public List<Map<String,Object>> findAll(String type){
-    return mongo.find(Query.query(Criteria.where("recordType").is(type)),Map.class,"app_records").stream().map(this::clean).toList();
+    return mongo.find(Query.query(Criteria.where("recordType").is(type)),Map.class,"app_records").stream().map(doc->{Map<String,Object> cleaned=clean(doc);Object recordId=doc.get("recordId");if(recordId!=null)cleaned.putIfAbsent("id",String.valueOf(recordId));return cleaned;}).toList();
   }
   public void delete(String type,String id){mongo.remove(Query.query(Criteria.where("_id").is(type+":"+id)),"app_records");}
   public long count(String type){return mongo.count(Query.query(Criteria.where("recordType").is(type)),"app_records");}

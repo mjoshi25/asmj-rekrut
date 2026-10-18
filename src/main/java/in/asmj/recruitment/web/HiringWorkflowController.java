@@ -76,6 +76,8 @@ public class HiringWorkflowController {
   @GetMapping("/hiring/applications/{applicationId}/documents")
   public String employerDocuments(@PathVariable String applicationId, Authentication auth, Model model, RedirectAttributes ra) {
     Map<String,Object> app = application(applicationId);
+    // Older Mongo/H2 records may not contain the id in their payload; the route ID is authoritative.
+    app.put("id", applicationId);
     if (!canEmployerAccess(app, auth)) { ra.addFlashAttribute("error", "You are not authorized to view this candidate's documents."); return "redirect:/applications"; }
     model.addAttribute("application", app);
     model.addAttribute("documents", store.findAll("candidateDocument").stream().filter(d -> applicationId.equals(String.valueOf(d.get("applicationId")))).toList());
@@ -86,6 +88,8 @@ public class HiringWorkflowController {
   @PostMapping("/hiring/applications/{applicationId}/offer")
   public String uploadOffer(@PathVariable String applicationId, @RequestParam(value="file", required=false) MultipartFile file, @RequestParam(required=false) String salary, @RequestParam(required=false) String joiningDate, @RequestParam(required=false) String notes, Authentication auth, RedirectAttributes ra) {
     Map<String,Object> app = application(applicationId);
+    if (applicationId == null || applicationId.isBlank()) { log.error("Offer upload rejected: blank applicationId"); ra.addFlashAttribute("error", "Application reference is missing. Reopen the candidate from Applications and try again."); return "redirect:/applications"; }
+    app.put("id", applicationId);
     if (!canEmployerAccess(app, auth)) return deny(ra, "/applications");
     if (!"HIRED".equalsIgnoreCase(String.valueOf(app.get("status")))) { ra.addFlashAttribute("error", "Mark the candidate Hired before issuing an offer letter."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
     if (file == null || file.isEmpty() || file.getSize() > 8L * 1024 * 1024) { ra.addFlashAttribute("error", "Choose an offer letter file up to 8 MB."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
