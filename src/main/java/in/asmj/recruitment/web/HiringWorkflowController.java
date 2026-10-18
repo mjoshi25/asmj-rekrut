@@ -80,6 +80,8 @@ public class HiringWorkflowController {
     app.put("id", applicationId);
     if (!canEmployerAccess(app, auth)) { ra.addFlashAttribute("error", "You are not authorized to view this candidate's documents."); return "redirect:/applications"; }
     model.addAttribute("application", app);
+    // Always pass the authoritative ID from the URL separately; older stored maps may omit it.
+    model.addAttribute("applicationId", applicationId);
     model.addAttribute("documents", store.findAll("candidateDocument").stream().filter(d -> applicationId.equals(String.valueOf(d.get("applicationId")))).toList());
     model.addAttribute("offers", store.findAll("offerLetter").stream().filter(o -> applicationId.equals(String.valueOf(o.get("applicationId")))).toList());
     return "hiring-documents";
