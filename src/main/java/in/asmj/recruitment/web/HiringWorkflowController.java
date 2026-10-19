@@ -146,8 +146,21 @@ public class HiringWorkflowController {
       try {
         ensureCloudinaryConfigured();
         String publicId = String.valueOf(file.get("cloudinaryPublicId"));
-        String signedUrl = cloudinary().url().resourceType("raw").type("authenticated").signed(true).generate(publicId);
-        response.sendRedirect(signedUrl);
+        String originalName = Objects.requireNonNullElse(String.valueOf(file.get("originalFilename")), "download.bin");
+        String ext = extension(originalName);
+        String format = ext.startsWith(".") ? ext.substring(1) : ext;
+        if (publicId.isBlank() || format.isBlank()) {
+          response.sendError(404, "Stored file reference is incomplete.");
+          return;
+        }
+        // Authenticated raw assets must use Cloudinary's private-download API endpoint,
+        // not a signed res.cloudinary.com delivery URL. The generated URL expires quickly.
+        String downloadUrl = cloudinary().privateDownload(publicId, format, ObjectUtils.asMap(
+            "resource_type", "raw",
+            "type", "authenticated",
+            "attachment", true,
+            "expires_at", System.currentTimeMillis() / 1000L + 300L));
+        response.sendRedirect(downloadUrl);
       } catch (Exception ex) {
         log.error("Could not generate authenticated Cloudinary download URL for {} {}", type, id, ex);
         response.sendError(502, "Document storage is temporarily unavailable. Please try again later.");
