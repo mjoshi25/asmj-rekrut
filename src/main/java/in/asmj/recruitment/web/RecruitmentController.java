@@ -301,12 +301,39 @@ public class RecruitmentController {
   }
   private double parseNumber(Object v){if(v==null)return 0;String s=String.valueOf(v).replaceAll("[^0-9.]","");try{return s.isBlank()?0:Double.parseDouble(s);}catch(Exception e){return 0;}}
   private double parseSalary(Object v){if(v==null)return 0;String raw=String.valueOf(v).toLowerCase(Locale.ROOT);java.util.regex.Matcher m=java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)").matcher(raw);if(!m.find())return 0;double n;try{n=Double.parseDouble(m.group(1));}catch(Exception e){return 0;}if(raw.contains("lpa")||raw.contains("lakh"))return n*100000d;if(raw.contains("crore")||raw.matches(".*\\bcr\\b.*"))return n*10000000d;return n;}
-  @GetMapping("/interviews") public String interviews(Model m) {
-    m.addAttribute("records",store.findAll("interview"));
-    m.addAttribute("applications",store.findAll("application"));
-    m.addAttribute("candidates",store.findAll("candidate"));
-    m.addAttribute("jobs",store.findAll("job").stream().filter(j -> !"CLOSED".equalsIgnoreCase(String.valueOf(j.get("status")))).toList());
+  @GetMapping("/interviews") public String interviews(Model m, Authentication auth) {
+    List<Map<String,Object>> visibleJobs = store.findAll("job").stream()
+        .filter(j -> !"CLOSED".equalsIgnoreCase(String.valueOf(j.get("status"))))
+        .filter(j -> canManageJob(auth, j)).toList();
+    Set<String> visibleJobIds = visibleJobs.stream().map(j -> String.valueOf(j.get("id"))).collect(java.util.stream.Collectors.toSet());
+    List<Map<String,Object>> visibleApplications = store.findAll("application").stream()
+        .filter(a -> visibleJobIds.contains(String.valueOf(a.get("jobId")))).toList();
+    Set<String> visibleCandidateEmails = visibleApplications.stream().map(a -> String.valueOf(a.get("email")))
+        .collect(java.util.stream.Collectors.toSet());
+    m.addAttribute("records", store.findAll("interview").stream()
+        .filter(i -> visibleJobIds.contains(String.valueOf(i.get("jobId")))
+            && visibleCandidateEmails.contains(String.valueOf(i.get("email")))).toList());
+    m.addAttribute("applications", visibleApplications);
+    m.addAttribute("candidates", store.findAll("candidate").stream()
+        .filter(c -> visibleCandidateEmails.contains(String.valueOf(c.get("email")))).toList());
+    m.addAttribute("jobs", visibleJobs);
     return "interviews";
+  }
+
+  private boolean canManageJob(Authentication auth, Map<String,Object> job) {
+    if (auth == null || job == null) return false;
+    if (hasRole(auth, "ROLE_ADMIN")) return true;
+    if (hasRole(auth, "ROLE_EMPLOYER")) return auth.getName().equalsIgnoreCase(String.valueOf(job.getOrDefault("employerEmail", "")));
+    if (hasRole(auth, "ROLE_RECRUITER")) {
+      String employerId = String.valueOf(job.getOrDefault("employerId", ""));
+      return auth.getName().equalsIgnoreCase(String.valueOf(job.getOrDefault("recruiterEmail", "")))
+          && store.findAll("recruiterAuthorization").stream().anyMatch(a ->
+              auth.getName().equalsIgnoreCase(String.valueOf(a.get("recruiterEmail")))
+              && employerId.equals(String.valueOf(a.get("employerId")))
+              && "ACTIVE".equalsIgnoreCase(String.valueOf(a.get("status")))
+              && Boolean.TRUE.equals(a.get("canManageCandidates")));
+    }
+    return false;
   }
   @PostMapping("/interviews/save")
   public String saveInterview(
@@ -337,6 +364,14 @@ public class RecruitmentController {
     }
     if (!online) meetingUrl = "";
     Map<String,Object> job = jobOpt.get();
+    if (!canManageJob(auth, job)) {
+      ra.addFlashAttribute("error", "You are not authorized to schedule interviews for this job.");
+      return "redirect:/interviews";
+    }
+    // A user must not be able to attach an unrelated candidate to another employer's job.
+    Set<String> eligibleEmails = store.findAll("application").stream()
+        .filter(a -> jobId.equals(String.valueOf(a.get("jobId"))))
+        .map(a -> String.valueOf(a.get("email"))).collect(java.util.stream.Collectors.toSet());
     String groupId = UUID.randomUUID().toString().replace("-", "");
     int notified = 0;
     int emailSent = 0;
@@ -346,7 +381,10 @@ public class RecruitmentController {
       if (candidateOpt.isEmpty()) { invalidCandidates.add(selectedId); continue; }
       Map<String,Object> candidate = candidateOpt.get();
       String email = String.valueOf(candidate.getOrDefault("email", "")).trim();
-      if (email.isBlank() || !email.contains("@")) { invalidCandidates.add(String.valueOf(candidate.getOrDefault("fullName", selectedId))); continue; }
+      if (email.isBlank() || !email.contains("@") || !eligibleEmails.contains(email)) {
+        invalidCandidates.add(String.valueOf(candidate.getOrDefault("fullName", selectedId)));
+        continue;
+      }
       String id = UUID.randomUUID().toString().replace("-", "");
       Map<String,Object> r = new LinkedHashMap<>();
       r.put("id", id); r.put("groupMeetingId", groupId);

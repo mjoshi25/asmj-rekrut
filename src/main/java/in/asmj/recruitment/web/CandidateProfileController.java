@@ -293,9 +293,38 @@ public class CandidateProfileController {
   }
 
   private boolean canViewCandidate(Authentication auth,Map<String,Object> c) {
-    if(auth==null)return false;
-    boolean allowed=auth.getAuthorities().stream().anyMatch(a->Set.of("ROLE_ADMIN","ROLE_EMPLOYER","ROLE_RECRUITER").contains(a.getAuthority()));
-    return allowed || auth.getName().equalsIgnoreCase(String.valueOf(c.get("email")));
+    if (auth == null || c == null) return false;
+    Set<String> roles = auth.getAuthorities().stream().map(a -> a.getAuthority()).collect(java.util.stream.Collectors.toSet());
+    String email = auth.getName();
+    if (roles.contains("ROLE_ADMIN")) return true;
+    if (roles.contains("ROLE_CANDIDATE")) return email.equalsIgnoreCase(String.valueOf(c.get("email")));
+    if (!roles.contains("ROLE_EMPLOYER") && !roles.contains("ROLE_RECRUITER")) return false;
+
+    // A resume is private candidate data: employers/recruiters must have a relevant
+    // application relationship, and recruiters must still hold active authorization.
+    for (Map<String,Object> app : store.findAll("application")) {
+      boolean sameCandidate = emailEquals(c.get("email"), app.get("email"))
+          || (!blank(c.get("id")) && String.valueOf(c.get("id")).equals(String.valueOf(app.get("candidateId"))));
+      if (!sameCandidate) continue;
+      if (roles.contains("ROLE_EMPLOYER") && email.equalsIgnoreCase(String.valueOf(app.getOrDefault("employerEmail", "")))) return true;
+      if (roles.contains("ROLE_RECRUITER") && email.equalsIgnoreCase(String.valueOf(app.getOrDefault("recruiterEmail", "")))) {
+        String employerId = String.valueOf(app.getOrDefault("employerId", ""));
+        boolean active = store.findAll("recruiterAuthorization").stream().anyMatch(a ->
+            email.equalsIgnoreCase(String.valueOf(a.get("recruiterEmail")))
+            && employerId.equals(String.valueOf(a.get("employerId")))
+            && "ACTIVE".equalsIgnoreCase(String.valueOf(a.get("status")))
+            && Boolean.TRUE.equals(a.get("canManageCandidates")));
+        if (active) return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean emailEquals(Object a, Object b) {
+    return a != null && b != null && String.valueOf(a).equalsIgnoreCase(String.valueOf(b));
+  }
+  private boolean blank(Object value) {
+    return value == null || String.valueOf(value).isBlank() || "null".equalsIgnoreCase(String.valueOf(value));
   }
   private List<Map<String,Object>> parseRows(com.fasterxml.jackson.databind.ObjectMapper mapper,
       com.fasterxml.jackson.core.type.TypeReference<List<Map<String,Object>>> type, String json) throws Exception {
