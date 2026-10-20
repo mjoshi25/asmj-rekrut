@@ -296,11 +296,26 @@ public class RecruitmentController {
     Map<String,Object> job=store.find("job",String.valueOf(application.get("jobId"))).orElse(new LinkedHashMap<>());
     Map<String,Object> cfg=store.find("settings","commission").orElse(Map.of("type","PERCENT","value",8));
     String type=String.valueOf(cfg.getOrDefault("type","PERCENT")); double value=parseNumber(cfg.get("value")); double salary=parseSalary(job.get("salary"));
-    double amount="FIXED".equals(type)?value:Math.round((salary*value/100.0)*100.0)/100.0;
-    String id=newId(); Map<String,Object> c=new LinkedHashMap<>(); c.put("id",id); c.put("applicationId",application.get("id")); c.put("candidateId",application.getOrDefault("candidateId","")); c.put("candidateName",application.get("fullName")); c.put("candidateEmail",application.get("email")); c.put("jobId",application.get("jobId")); c.put("jobTitle",application.get("jobTitle")); c.put("employerId",application.getOrDefault("employerId",job.get("employerId"))); c.put("company",application.getOrDefault("company",job.get("company"))); c.put("employerEmail",application.getOrDefault("employerEmail",job.get("employerEmail"))); c.put("recruiterEmail",application.getOrDefault("recruiterEmail",job.getOrDefault("recruiterEmail",""))); c.put("modelType",type); c.put("modelValue",value); c.put("salaryBase",salary); c.put("amount",amount); c.put("currency","INR"); c.put("paymentStatus","PENDING"); c.put("calculationStatus",("PERCENT".equals(type)&&salary<=0)?"NEEDS_SALARY":"CALCULATED"); c.put("createdAt",LocalDate.now().toString()); store.save("commission",id,c);
+    boolean salaryRequired="PERCENT".equals(type) && salary<=0;
+    double amount=salaryRequired?0.0:("FIXED".equals(type)?value:Math.round((salary*value/100.0)*100.0)/100.0);
+    String id=newId(); Map<String,Object> c=new LinkedHashMap<>(); c.put("id",id); c.put("applicationId",application.get("id")); c.put("candidateId",application.getOrDefault("candidateId","")); c.put("candidateName",application.get("fullName")); c.put("candidateEmail",application.get("email")); c.put("jobId",application.get("jobId")); c.put("jobTitle",application.get("jobTitle")); c.put("employerId",application.getOrDefault("employerId",job.get("employerId"))); c.put("company",application.getOrDefault("company",job.get("company"))); c.put("employerEmail",application.getOrDefault("employerEmail",job.get("employerEmail"))); c.put("recruiterEmail",application.getOrDefault("recruiterEmail",job.getOrDefault("recruiterEmail",""))); c.put("modelType",type); c.put("modelValue",value); c.put("salaryBase",salary); c.put("amount",amount); c.put("currency","INR"); c.put("paymentStatus","PENDING"); c.put("calculationStatus",salaryRequired?"NEEDS_SALARY":"CALCULATED"); c.put("createdAt",LocalDate.now().toString()); store.save("commission",id,c);
   }
   private double parseNumber(Object v){if(v==null)return 0;String s=String.valueOf(v).replaceAll("[^0-9.]","");try{return s.isBlank()?0:Double.parseDouble(s);}catch(Exception e){return 0;}}
-  private double parseSalary(Object v){if(v==null)return 0;String raw=String.valueOf(v).toLowerCase(Locale.ROOT);java.util.regex.Matcher m=java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)").matcher(raw);if(!m.find())return 0;double n;try{n=Double.parseDouble(m.group(1));}catch(Exception e){return 0;}if(raw.contains("lpa")||raw.contains("lakh"))return n*100000d;if(raw.contains("crore")||raw.matches(".*\\bcr\\b.*"))return n*10000000d;return n;}
+  /** Accept only one full annual INR amount; never infer LPA, monthly pay, or a range. */
+  private double parseSalary(Object v){
+    if(v==null)return 0;
+    String raw=String.valueOf(v).trim().toLowerCase(Locale.ROOT);
+    if(raw.isBlank() || raw.matches(".*(lpa|lakh|lac|crore|\\bcr\\b|per month|monthly|/month|salary range).*"))return 0;
+    if(raw.matches(".*(–|—|\\bto\\b).*"))return 0;
+    if(raw.matches(".*[0-9]\\s*-\\s*[₹$]?[0-9].*"))return 0;
+    String normalized=raw.replace(",", "");
+    java.util.regex.Matcher m=java.util.regex.Pattern.compile("[0-9]+(?:\\.[0-9]+)?").matcher(normalized);
+    if(!m.find())return 0;
+    String number=m.group();
+    if(m.find())return 0;
+    try { double amount=Double.parseDouble(number); return Double.isFinite(amount)&&amount>0&&amount<=100000000000d?amount:0; }
+    catch(Exception e){return 0;}
+  }
   @GetMapping("/interviews") public String interviews(Model m, Authentication auth) {
     List<Map<String,Object>> visibleJobs = store.findAll("job").stream()
         .filter(j -> !"CLOSED".equalsIgnoreCase(String.valueOf(j.get("status"))))
