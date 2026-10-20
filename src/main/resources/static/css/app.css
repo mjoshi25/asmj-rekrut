@@ -50,3 +50,21 @@
  .topbar nav .nav-user{font-size:11px;padding:8px 5px}
  .topbar .nav-logout-button{font-size:12px;border-radius:11px}
 }
+
+/* ASMJ Recruitment navigation palette refinement: deep teal, white and soft mint */
+.topbar{background:#ffffff;border-bottom:1px solid #d9e8e3;box-shadow:0 4px 18px rgba(18,68,62,.05)}
+.topbar nav{color:#24484a}
+.topbar nav>a{color:#24484a;background:transparent}
+.topbar nav>a:hover{background:#e4f4f0;border-color:#b9ded4;color:#075e62}
+.topbar nav .nav-login{background:#087f8c;border-color:#087f8c;color:#ffffff}
+.topbar nav .nav-login:hover{background:#066a73;border-color:#066a73;color:#ffffff}
+.topbar nav .nav-user{background:#eaf5f2;border-color:#d5e8e2;color:#245a58}
+.topbar .nav-logout-button{background:#ffffff;border-color:#d5e5df;color:#36565a}
+.topbar .nav-logout-button:hover{background:#fff1ef;border-color:#efcfc9;color:#9b3e35}
+@media(max-width:850px){
+ .topbar nav>a{background:#ffffff;border-color:#dce9e4;color:#24484a}
+ .topbar nav>a:hover{background:#e4f4f0;border-color:#b9ded4;color:#075e62}
+ .topbar nav>a.nav-login{background:#087f8c;border-color:#087f8c;color:#ffffff}
+ .topbar nav>a.nav-login:hover{background:#066a73;border-color:#066a73;color:#ffffff}
+ .topbar .nav-logout-button{background:#ffffff;border-color:#dce9e4;color:#36565a}
+}
