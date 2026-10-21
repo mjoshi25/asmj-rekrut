@@ -45,3 +45,11 @@ Configure these Render environment variables (the same Cloudinary account alread
 - `CLOUDINARY_API_SECRET`
 
 All three must be populated with values from the Cloudinary dashboard. If they are missing or incorrect, document/offer uploads will show a configuration or Cloudinary API error rather than silently writing to a local folder. Existing documents that were saved only on a previous temporary Render filesystem cannot be migrated automatically unless those files still exist.
+
+
+## Candidate application authentication fix
+
+- `POST /jobs/{id}/apply` now requires `ROLE_CANDIDATE` in Spring Security.
+- The controller also checks authentication and candidate role as defense in depth.
+- The submitted application email is taken from the signed-in account, not the form field.
+- Public job browsing and job detail pages remain public.

@@ -45,7 +45,8 @@ public class SecurityConfig {
 
   @Bean SecurityFilterChain security(HttpSecurity http) throws Exception {
     return http.authorizeHttpRequests(a -> a
-        .requestMatchers("/", "/jobs", "/opportunity/*", "/jobs/*/apply", "/register/**", "/login", "/founder", "/compliance", "/css/**", "/js/**", "/images/**", "/h2-console/**", "/error").permitAll()
+        .requestMatchers("/", "/jobs", "/opportunity/*", "/register/**", "/login", "/founder", "/compliance", "/css/**", "/js/**", "/images/**", "/h2-console/**", "/error").permitAll()
+        .requestMatchers("/jobs/*/apply").hasRole("CANDIDATE")
         .requestMatchers("/admin/**", "/reports/**", "/employers/**", "/placements/**").hasRole("ADMIN")
         .requestMatchers("/candidate/profile/**", "/candidate/profile", "/candidate/hiring/**").hasRole("CANDIDATE")
         .requestMatchers("/settings/**").authenticated()

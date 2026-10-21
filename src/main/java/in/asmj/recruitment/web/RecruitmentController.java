@@ -237,13 +237,15 @@ public class RecruitmentController {
     store.save("job",String.valueOf(r.get("id")),r); ra.addFlashAttribute("success","Job opening published and linked to the selected employer."); return "redirect:/jobs";
   }
   @PostMapping("/jobs/{id}/apply") public String apply(@PathVariable String id, @RequestParam String fullName, @RequestParam String email, @RequestParam(required=false) String phone, @RequestParam(required=false) String alternateMobile, Authentication auth, RedirectAttributes ra) {
-    Map<String,Object> job=store.find("job",id).orElseThrow(); String normalized=normalizedEmail(email);
-    String lookupEmail=normalized; Map<String,Object> candidate=store.findAll("candidate").stream().filter(c->lookupEmail.equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(null);
-    if(auth!=null && hasRole(auth,"ROLE_CANDIDATE")) {
-      normalized=normalizedEmail(auth.getName()); String signedInEmail=normalized;
-      candidate=store.findAll("candidate").stream().filter(c->signedInEmail.equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(candidate);
-      if(candidate!=null){fullName=String.valueOf(candidate.getOrDefault("fullName",fullName));phone=String.valueOf(candidate.getOrDefault("mobile",candidate.getOrDefault("phone",phone==null?"":phone)));alternateMobile=String.valueOf(candidate.getOrDefault("alternateMobile",alternateMobile==null?"":alternateMobile));}
+    // Defense in depth: applying is candidate-only even if this controller is invoked
+    // outside the expected Spring Security request flow.
+    if (auth == null || !auth.isAuthenticated() || !hasRole(auth, "ROLE_CANDIDATE")) {
+      ra.addFlashAttribute("error", "Please sign in with your candidate account to apply for this job.");
+      return "redirect:/login";
     }
+    Map<String,Object> job=store.find("job",id).orElseThrow(); String normalized=normalizedEmail(auth.getName());
+    String lookupEmail=normalized; Map<String,Object> candidate=store.findAll("candidate").stream().filter(c->lookupEmail.equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(null);
+    if(candidate!=null){fullName=String.valueOf(candidate.getOrDefault("fullName",fullName));phone=String.valueOf(candidate.getOrDefault("mobile",candidate.getOrDefault("phone",phone==null?"":phone)));alternateMobile=String.valueOf(candidate.getOrDefault("alternateMobile",alternateMobile==null?"":alternateMobile));}
     String appId=newId(); Map<String,Object> a=new LinkedHashMap<>(); a.put("id",appId); a.put("jobId",id); a.put("jobTitle",job.get("title")); a.put("company",job.get("company")); a.put("employerId",job.get("employerId")); a.put("employerEmail",job.get("employerEmail")); a.put("recruiterEmail",job.getOrDefault("recruiterEmail","")); a.put("candidateId",candidate==null?"":candidate.get("id")); a.put("fullName",fullName); a.put("email",normalized); a.put("phone",phone); a.put("alternateMobile",alternateMobile); a.put("status","APPLIED"); a.put("appliedAt",LocalDate.now().toString()); store.save("application",appId,a); ra.addFlashAttribute("success","Application submitted. Reference: "+appId); return "redirect:/opportunity/"+id;
   }
   @GetMapping("/applications") public String applications(Model m, Authentication auth) {
