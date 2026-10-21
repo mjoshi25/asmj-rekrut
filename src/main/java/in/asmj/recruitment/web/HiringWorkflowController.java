@@ -48,8 +48,42 @@ public class HiringWorkflowController {
     model.addAttribute("hiredApplications", apps.stream().filter(a -> "HIRED".equalsIgnoreCase(String.valueOf(a.get("status")))).toList());
     model.addAttribute("documents", store.findAll("candidateDocument").stream().filter(d -> auth.getName().equalsIgnoreCase(String.valueOf(d.get("candidateEmail")))).toList());
     model.addAttribute("offers", store.findAll("offerLetter").stream().filter(o -> auth.getName().equalsIgnoreCase(String.valueOf(o.get("candidateEmail")))).toList());
-    model.addAttribute("notifications", store.findAll("notification").stream().filter(n -> auth.getName().equalsIgnoreCase(String.valueOf(n.get("candidateEmail")))).toList());
+    model.addAttribute("notifications", store.findAll("notification").stream().filter(n -> auth.getName().equalsIgnoreCase(String.valueOf(n.getOrDefault("recipientEmail", n.get("candidateEmail"))))).sorted((a,b) -> String.valueOf(b.getOrDefault("createdAt", "")).compareTo(String.valueOf(a.getOrDefault("createdAt", "")))).toList());
     return "candidate-hiring";
+  }
+
+  @PostMapping("/candidate/notifications/{notificationId}/read")
+  public String markNotificationRead(@PathVariable String notificationId, Authentication auth, RedirectAttributes ra) {
+    Map<String,Object> n = store.find("notification", notificationId).orElse(null);
+    if (n == null || !auth.getName().equalsIgnoreCase(String.valueOf(n.getOrDefault("recipientEmail", n.get("candidateEmail"))))) {
+      ra.addFlashAttribute("error", "Notification not found or you are not authorized to update it.");
+      return "redirect:/candidate/hiring";
+    }
+    n.put("read", true); n.put("readAt", LocalDate.now().toString());
+    store.save("notification", notificationId, n);
+    return "redirect:/candidate/hiring";
+  }
+
+  @PostMapping("/candidate/notifications/read-all")
+  public String markAllNotificationsRead(Authentication auth, RedirectAttributes ra) {
+    int updated = 0;
+    for (Map<String,Object> n : store.findAll("notification")) {
+      if (auth.getName().equalsIgnoreCase(String.valueOf(n.getOrDefault("recipientEmail", n.get("candidateEmail")))) && !Boolean.parseBoolean(String.valueOf(n.getOrDefault("read", false)))) {
+        n.put("read", true); n.put("readAt", LocalDate.now().toString());
+        store.save("notification", String.valueOf(n.get("id")), n); updated++;
+      }
+    }
+    ra.addFlashAttribute("success", updated == 0 ? "You are all caught up." : updated + " notification(s) marked as read.");
+    return "redirect:/candidate/hiring";
+  }
+
+  private void createNotification(String recipientEmail, String applicationId, String type, String message) {
+    if (recipientEmail == null || recipientEmail.isBlank()) return;
+    String notificationId = id(); Map<String,Object> n = new LinkedHashMap<>();
+    n.put("id", notificationId); n.put("recipientEmail", recipientEmail.trim()); n.put("candidateEmail", recipientEmail.trim());
+    n.put("applicationId", Objects.requireNonNullElse(applicationId, "")); n.put("type", type); n.put("message", message);
+    n.put("createdAt", LocalDate.now().toString()); n.put("read", false);
+    store.save("notification", notificationId, n);
   }
 
   @PostMapping("/candidate/hiring/{applicationId}/documents")
@@ -105,6 +139,7 @@ public class HiringWorkflowController {
       Map<String,Object> offer = new LinkedHashMap<>(); offer.put("id", id); offer.put("applicationId", applicationId); offer.put("candidateId", app.getOrDefault("candidateId", "")); offer.put("candidateEmail", app.get("email")); offer.put("employerEmail", auth.getName()); offer.put("version", version); offer.put("originalFilename", original); offer.put("storageProvider", "CLOUDINARY"); offer.put("cloudinaryPublicId", cloud.get("public_id")); offer.put("cloudinaryResourceType", "raw"); offer.put("cloudinaryDeliveryType", "authenticated"); offer.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); offer.put("salary", Objects.requireNonNullElse(salary, "")); offer.put("joiningDate", Objects.requireNonNullElse(joiningDate, "")); offer.put("notes", Objects.requireNonNullElse(notes, "")); offer.put("status", "PENDING_CANDIDATE_RESPONSE"); offer.put("uploadedAt", LocalDate.now().toString()); store.save("offerLetter", id, offer);
       for (Map<String,Object> old : store.findAll("offerLetter")) if (applicationId.equals(String.valueOf(old.get("applicationId"))) && !id.equals(String.valueOf(old.get("id"))) && "PENDING_CANDIDATE_RESPONSE".equals(String.valueOf(old.get("status")))) { old.put("status", "SUPERSEDED"); store.save("offerLetter", String.valueOf(old.get("id")), old); }
       app.put("offerStatus", "PENDING_CANDIDATE_RESPONSE"); app.put("latestOfferId", id); store.save("application", applicationId, app);
+      createNotification(String.valueOf(app.get("email")), applicationId, "OFFER_LETTER_UPLOADED", "A new offer letter (version " + version + ") is available for " + app.getOrDefault("jobTitle", "your application") + ". Please review it in Hiring & Offers.");
       ra.addFlashAttribute("success", "Offer letter v" + version + " sent to the candidate.");
     } catch (Exception e) { log.error("Offer-letter upload failed for application {} during Cloudinary upload", applicationId, e); ra.addFlashAttribute("error", "Could not store the offer letter: " + uploadFailureReason(e) + ". Check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in Render; file limit is 8 MB."); }
     return "redirect:/hiring/applications/" + applicationId + "/documents";
@@ -119,6 +154,8 @@ public class HiringWorkflowController {
     else if ("REVISE".equals(decision)) { if (comments == null || comments.isBlank()) { ra.addFlashAttribute("error", "Please explain the revision you are requesting."); return "redirect:/candidate/hiring"; } offer.put("status", "REVISION_REQUESTED"); offer.put("respondedAt", LocalDate.now().toString()); offer.put("candidateComments", comments.trim()); }
     else { ra.addFlashAttribute("error", "Choose Accept Offer or Request Revision."); return "redirect:/candidate/hiring"; }
     store.save("offerLetter", offerId, offer); Map<String,Object> app = application(String.valueOf(offer.get("applicationId"))); app.put("offerStatus", offer.get("status")); store.save("application", String.valueOf(app.get("id")), app);
+    String responseLabel = "ACCEPT".equals(decision) ? "accepted" : "requested a revision to";
+    createNotification(String.valueOf(offer.get("employerEmail")), String.valueOf(offer.get("applicationId")), "OFFER_RESPONSE", "The candidate " + responseLabel + " offer letter v" + offer.getOrDefault("version", "1") + " for " + app.getOrDefault("jobTitle", "the role") + ".");
     ra.addFlashAttribute("success", "Your response has been recorded and shared with the employer."); return "redirect:/candidate/hiring";
   }
 
@@ -130,6 +167,8 @@ public class HiringWorkflowController {
     if (!canEmployerAccess(app, auth)) return deny(ra, "/applications");
     if (!Set.of("VERIFIED", "REUPLOAD_REQUIRED").contains(status)) { ra.addFlashAttribute("error", "Invalid review status."); return "redirect:/hiring/applications/" + app.get("id") + "/documents"; }
     d.put("reviewStatus", status); d.put("reviewedBy", auth.getName()); d.put("reviewedAt", LocalDate.now().toString()); store.save("candidateDocument", documentId, d);
+    String reviewMessage = "VERIFIED".equals(status) ? "Your " + d.getOrDefault("documentType", "joining document") + " has been verified." : "Please re-upload your " + d.getOrDefault("documentType", "joining document") + " after reviewing the employer feedback.";
+    createNotification(String.valueOf(d.get("candidateEmail")), String.valueOf(d.get("applicationId")), "DOCUMENT_REVIEW", reviewMessage);
     ra.addFlashAttribute("success", "Document review saved."); return "redirect:/hiring/applications/" + app.get("id") + "/documents";
   }
 

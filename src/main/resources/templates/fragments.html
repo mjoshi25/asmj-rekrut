@@ -15,6 +15,7 @@
     <a href="/settings" sec:authorize="isAuthenticated()">Settings</a>
   </div></details>
   <details class="nav-group" sec:authorize="hasRole('ADMIN')"><summary>Admin <span class="nav-caret">⌄</span></summary><div class="nav-menu"><a href="/admin/registrations">Approvals</a><a href="/admin/site-content">Site content</a><a href="/admin/relationships">Relationship audit</a><a href="/admin/commission">Commission</a></div></details>
+  <a class="nav-notification-link" href="/candidate/hiring" sec:authorize="hasRole('CANDIDATE')" aria-label="Hiring notifications">♢ Notifications <span class="nav-notification-count" th:if="${unreadNotificationCount > 0}" th:text="${unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}">0</span></a>
   <div class="nav-account" sec:authorize="isAuthenticated()"><span class="nav-user" sec:authentication="name"></span><form class="nav-logout" th:action="@{/logout}" method="post"><button type="submit" class="nav-logout-button">Sign out</button></form></div>
 </nav></header>
 <div th:fragment="flash" th:if="${success}" class="alert" th:text="${success}"></div>

@@ -111,3 +111,33 @@
  .topbar .nav-logout{min-width:0;width:100%}
  .topbar .nav-logout-button{width:100%;min-height:42px;font-size:12px}
 }
+
+
+/* ASMJ Recruitment in-app notifications */
+.topbar .nav-notification-link{position:relative;display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 11px;border:1px solid #cfe5dd;border-radius:10px;background:#f2faf7;color:#075e62;font-size:12px;font-weight:750;white-space:nowrap}
+.topbar .nav-notification-link:hover{background:#e1f4ee;border-color:#a8d8cb}
+.nav-notification-count{display:inline-grid;place-items:center;min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:#d24c43;color:#fff;font-size:10px;font-weight:800;line-height:1}
+.notification-panel{margin-bottom:22px}
+.notification-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:16px}
+.notification-heading h2{display:flex;align-items:center;gap:9px}
+.notification-total{display:inline-grid;place-items:center;min-width:24px;height:24px;padding:0 7px;border-radius:99px;background:#e7f5f0;color:#087f78;font:700 12px 'DM Sans',sans-serif}
+.notification-heading .muted{margin:4px 0 0}
+.notification-read-all{white-space:nowrap;padding:10px 13px;font-size:12px}
+.notification-item{display:flex;align-items:flex-start;gap:13px;padding:15px 12px;border:1px solid #e3ece7;border-radius:12px;background:#fbfdfc;margin-top:9px;min-width:0}
+.notification-item.is-unread{background:#f0faf6;border-color:#c7e6db}
+.notification-dot{width:9px;height:9px;margin-top:6px;flex:0 0 9px;border-radius:50%;background:#0b9a87}
+.notification-item.is-read .notification-dot{background:#c5d3ce}
+.notification-copy{min-width:0;flex:1}
+.notification-meta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;color:#59706d;font-size:10px;letter-spacing:.35px;text-transform:uppercase}
+.notification-meta b{color:#087f78;font-size:10px}
+.notification-meta time{color:#81928d;text-transform:none;letter-spacing:0}
+.notification-unread-label{border-radius:20px;padding:2px 6px;background:#d8f2e8;color:#08705f;font-size:9px;font-weight:800}
+.notification-copy p{margin:5px 0;color:#304c4c;font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.notification-copy small{color:#84938f;font-size:10px;overflow-wrap:anywhere}
+.notification-read-button{display:grid;place-items:center;width:30px;height:30px;border:1px solid #cce4da;border-radius:9px;background:#fff;color:#087f78;font-weight:800;cursor:pointer}
+.notification-read-button:hover{background:#087f78;color:#fff;border-color:#087f78}
+.notification-empty{display:grid;justify-items:center;text-align:center;padding:30px 18px;background:#f8fbf9;border:1px dashed #d3e4dc;border-radius:12px;color:#6d817b}
+.notification-empty>span{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#e4f4ee;color:#087f78;font-size:24px;margin-bottom:10px}
+.notification-empty b{font:750 15px Manrope,sans-serif;color:#294b49}
+.notification-empty p{max-width:440px;margin:5px 0 0;font-size:12px}
+@media(max-width:560px){.notification-heading{flex-direction:column;align-items:stretch}.notification-heading form,.notification-read-all{width:100%}.notification-item{gap:9px;padding:12px 10px}.notification-read-button{width:28px;height:28px;flex:0 0 28px}.topbar .nav-notification-link{justify-content:center;white-space:normal;min-width:0}}
