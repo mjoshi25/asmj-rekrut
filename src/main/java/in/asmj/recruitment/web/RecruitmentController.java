@@ -269,18 +269,24 @@ public class RecruitmentController {
     m.addAttribute("records", records); return "applications";
   }
   @PostMapping("/applications/{id}/status") public String applicationStatus(@PathVariable String id,@RequestParam String status,RedirectAttributes ra) {
-    if(!Set.of("APPLIED","SHORTLISTED","INTERVIEW","OFFERED","SELECTED","HIRED","REJECTED").contains(status)){ra.addFlashAttribute("error","Invalid application status.");return "redirect:/applications";}
+    if(!Set.of("APPLIED","SHORTLISTED","INTERVIEW","OFFERED","SELECTED","HIRED","DOCUMENTS_RECEIVED","OFFER_SENT","OFFER_ACCEPTED","JOINED","REJECTED").contains(status)){ra.addFlashAttribute("error","Invalid application status.");return "redirect:/applications";}
     Map<String,Object> a=store.find("application",id).orElseThrow();
     if (!canManageApplication(a, org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication())) { ra.addFlashAttribute("error", "You are not authorized to update this application."); return "redirect:/applications"; }
     String previous = String.valueOf(a.getOrDefault("status", "APPLIED"));
+    if (!status.equals(previous)) {
+      String actor = Optional.ofNullable(org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication()).map(Authentication::getName).orElse("system");
+      Map<String,Object> audit = new LinkedHashMap<>(); audit.put("id", newId()); audit.put("applicationId", id); audit.put("candidateEmail", a.get("email")); audit.put("fromStatus", previous); audit.put("toStatus", status); audit.put("changedBy", actor); audit.put("changedAt", java.time.Instant.now().toString()); store.save("applicationStatusAudit", String.valueOf(audit.get("id")), audit);
+      if (a.get("statusHistory") instanceof List<?> oldHistory) { List<Object> history = new ArrayList<>(oldHistory); history.add(audit); a.put("statusHistory", history); } else a.put("statusHistory", new ArrayList<>(List.of(audit)));
+      String notificationId = newId(); Map<String,Object> n = new LinkedHashMap<>(); n.put("id", notificationId); n.put("candidateEmail", a.get("email")); n.put("recipientEmail", a.get("email")); n.put("applicationId", id); n.put("type", "APPLICATION_STATUS_CHANGED"); n.put("message", "Your application for " + a.getOrDefault("jobTitle", "the role") + " changed from " + previous.replace('_',' ') + " to " + status.replace('_',' ') + "."); n.put("createdAt", java.time.Instant.now().toString()); n.put("read", false); store.save("notification", notificationId, n);
+    }
     a.put("status",status); a.put("statusUpdatedAt",LocalDate.now().toString());
     if ("HIRED".equals(status) && !"HIRED".equals(previous)) {
       a.put("documentRequestStatus", "REQUESTED"); a.put("documentsRequestedAt", LocalDate.now().toString());
       String notificationId = newId(); Map<String,Object> n = new LinkedHashMap<>(); n.put("id", notificationId); n.put("candidateEmail", a.get("email")); n.put("applicationId", id); n.put("type", "JOINING_DOCUMENTS_REQUIRED"); n.put("message", "Congratulations! You have been marked Hired for " + a.getOrDefault("jobTitle", "the role") + ". Please upload your joining documents."); n.put("createdAt", LocalDate.now().toString()); n.put("read", false); store.save("notification", notificationId, n);
     }
     store.save("application",id,a);
-    if(Set.of("SELECTED","HIRED").contains(status)) createCommissionIfMissing(a);
-    ra.addFlashAttribute("success",Set.of("SELECTED","HIRED").contains(status)?("HIRED".equals(status)?"Candidate marked Hired. The candidate has been notified to upload joining documents. A commission record has been created or confirmed.":"Candidate status updated. A commission record has been created or confirmed."):"Application status updated."); return "redirect:/applications";
+    if(Set.of("SELECTED","HIRED","OFFER_SENT","OFFER_ACCEPTED","JOINED").contains(status)) createCommissionIfMissing(a);
+    ra.addFlashAttribute("success", "Application stage updated to " + status.replace('_',' ') + ". Status history and candidate notification recorded." + (Set.of("SELECTED","HIRED","OFFER_SENT","OFFER_ACCEPTED","JOINED").contains(status) ? " Commission record created or confirmed." : "")); return "redirect:/applications";
   }
   private boolean canManageApplication(Map<String,Object> app, Authentication auth) {
     if (auth == null) return false;

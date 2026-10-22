@@ -45,7 +45,7 @@ public class HiringWorkflowController {
   public String candidateHiring(Authentication auth, Model model) {
     List<Map<String,Object>> apps = candidateApps(auth.getName());
     model.addAttribute("applications", apps);
-    model.addAttribute("hiredApplications", apps.stream().filter(a -> "HIRED".equalsIgnoreCase(String.valueOf(a.get("status")))).toList());
+    model.addAttribute("hiredApplications", apps.stream().filter(a -> Set.of("HIRED", "DOCUMENTS_RECEIVED", "OFFER_SENT", "OFFER_ACCEPTED", "JOINED").contains(String.valueOf(a.get("status")).toUpperCase(Locale.ROOT))).toList());
     model.addAttribute("documents", store.findAll("candidateDocument").stream().filter(d -> auth.getName().equalsIgnoreCase(String.valueOf(d.get("candidateEmail")))).toList());
     model.addAttribute("offers", store.findAll("offerLetter").stream().filter(o -> auth.getName().equalsIgnoreCase(String.valueOf(o.get("candidateEmail")))).toList());
     model.addAttribute("notifications", store.findAll("notification").stream().filter(n -> auth.getName().equalsIgnoreCase(String.valueOf(n.getOrDefault("recipientEmail", n.get("candidateEmail"))))).sorted((a,b) -> String.valueOf(b.getOrDefault("createdAt", "")).compareTo(String.valueOf(a.getOrDefault("createdAt", "")))).toList());
@@ -77,6 +77,15 @@ public class HiringWorkflowController {
     return "redirect:/candidate/hiring";
   }
 
+  private void recordStageChange(Map<String,Object> app, String applicationId, String stage, String actor, String note) {
+    String previous = String.valueOf(app.getOrDefault("status", "APPLIED"));
+    if (stage.equals(previous)) return;
+    app.put("status", stage); app.put("statusUpdatedAt", LocalDate.now().toString());
+    String auditId = id(); Map<String,Object> audit = new LinkedHashMap<>(); audit.put("id", auditId); audit.put("applicationId", applicationId); audit.put("candidateEmail", app.get("email")); audit.put("fromStatus", previous); audit.put("toStatus", stage); audit.put("changedBy", actor); audit.put("changedAt", java.time.Instant.now().toString()); audit.put("note", note); store.save("applicationStatusAudit", auditId, audit);
+    if (app.get("statusHistory") instanceof List<?> existing) { List<Object> history = new ArrayList<>(existing); history.add(audit); app.put("statusHistory", history); } else app.put("statusHistory", new ArrayList<>(List.of(audit)));
+    createNotification(String.valueOf(app.get("email")), applicationId, "APPLICATION_STATUS_CHANGED", "Your application for " + app.getOrDefault("jobTitle", "the role") + " changed from " + previous.replace('_',' ') + " to " + stage.replace('_',' ') + ".");
+  }
+
   private void createNotification(String recipientEmail, String applicationId, String type, String message) {
     if (recipientEmail == null || recipientEmail.isBlank()) return;
     String notificationId = id(); Map<String,Object> n = new LinkedHashMap<>();
@@ -90,7 +99,7 @@ public class HiringWorkflowController {
   public String uploadDocument(@PathVariable String applicationId, @RequestParam String documentType, @RequestParam("file") MultipartFile file, Authentication auth, RedirectAttributes ra) {
     Map<String,Object> app = application(applicationId);
     if (!isCandidateOwner(app, auth)) return deny(ra, "/candidate/hiring");
-    if (!"HIRED".equalsIgnoreCase(String.valueOf(app.get("status")))) { ra.addFlashAttribute("error", "Joining documents can be uploaded after the application is marked Hired."); return "redirect:/candidate/hiring"; }
+    if (!Set.of("HIRED", "DOCUMENTS_RECEIVED", "OFFER_SENT", "OFFER_ACCEPTED", "JOINED").contains(String.valueOf(app.get("status")).toUpperCase(Locale.ROOT))) { ra.addFlashAttribute("error", "Joining documents can be uploaded after the application is marked Hired."); return "redirect:/candidate/hiring"; }
     if (file == null || file.isEmpty() || file.getSize() > 8L * 1024 * 1024) { ra.addFlashAttribute("error", "Choose a file up to 8 MB."); return "redirect:/candidate/hiring"; }
     String safeType = documentType == null ? "Other" : documentType.trim();
     String uploadExt = extension(Objects.requireNonNullElse(file.getOriginalFilename(), "")).toLowerCase(Locale.ROOT);
@@ -101,7 +110,11 @@ public class HiringWorkflowController {
       String id = id(); String original = Paths.get(Objects.requireNonNullElse(file.getOriginalFilename(), "document")).getFileName().toString();
       Map<String,Object> cloud = uploadPrivateFile(file, "asmj-recruitment/candidates/" + safeSegment(String.valueOf(app.get("candidateId"))) + "/" + safeSegment(applicationId) + "/documents", id + "-" + safeCloudinaryFilename(original));
       Map<String,Object> d = new LinkedHashMap<>(); d.put("id", id); d.put("applicationId", applicationId); d.put("candidateId", app.getOrDefault("candidateId", "")); d.put("candidateEmail", auth.getName()); d.put("candidateName", app.get("fullName")); d.put("documentType", safeType); d.put("originalFilename", original); d.put("storageProvider", "CLOUDINARY"); d.put("cloudinaryPublicId", cloud.get("public_id")); d.put("cloudinaryResourceType", "raw"); d.put("cloudinaryDeliveryType", "authenticated"); d.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); d.put("size", file.getSize()); d.put("uploadedAt", LocalDate.now().toString()); d.put("reviewStatus", "PENDING_REVIEW"); store.save("candidateDocument", id, d);
-      app.put("documentRequestStatus", "UPLOADED"); store.save("application", applicationId, app);
+      app.put("documentRequestStatus", "UPLOADED");
+      if (Set.of("HIRED", "DOCUMENTS_RECEIVED").contains(String.valueOf(app.get("status")).toUpperCase(Locale.ROOT))) {
+        recordStageChange(app, applicationId, "DOCUMENTS_RECEIVED", auth.getName(), "Candidate uploaded joining documents");
+      }
+      store.save("application", applicationId, app);
       ra.addFlashAttribute("success", "Document uploaded securely. The employer can review it from the application workflow.");
     } catch (Exception e) { log.error("Joining-document upload failed for application {} during Cloudinary upload", applicationId, e); ra.addFlashAttribute("error", "Upload failed: " + uploadFailureReason(e) + ". Check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in Render."); }
     return "redirect:/candidate/hiring";
@@ -127,7 +140,7 @@ public class HiringWorkflowController {
     if (applicationId == null || applicationId.isBlank()) { log.error("Offer upload rejected: blank applicationId"); ra.addFlashAttribute("error", "Application reference is missing. Reopen the candidate from Applications and try again."); return "redirect:/applications"; }
     app.put("id", applicationId);
     if (!canEmployerAccess(app, auth)) return deny(ra, "/applications");
-    if (!"HIRED".equalsIgnoreCase(String.valueOf(app.get("status")))) { ra.addFlashAttribute("error", "Mark the candidate Hired before issuing an offer letter."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
+    if (!Set.of("HIRED", "DOCUMENTS_RECEIVED", "OFFER_SENT", "OFFER_ACCEPTED").contains(String.valueOf(app.get("status")).toUpperCase(Locale.ROOT))) { ra.addFlashAttribute("error", "Mark the candidate Hired before issuing an offer letter."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
     if (file == null || file.isEmpty() || file.getSize() > 8L * 1024 * 1024) { ra.addFlashAttribute("error", "Choose an offer letter file up to 8 MB."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
     String offerExt = extension(Objects.requireNonNullElse(file.getOriginalFilename(), "")).toLowerCase(Locale.ROOT);
     if (!Set.of(".pdf", ".doc", ".docx").contains(offerExt)) { ra.addFlashAttribute("error", "Offer letters must be PDF, DOC or DOCX files."); return "redirect:/hiring/applications/" + applicationId + "/documents"; }
@@ -138,7 +151,9 @@ public class HiringWorkflowController {
       Map<String,Object> cloud = uploadPrivateFile(file, "asmj-recruitment/candidates/" + safeSegment(String.valueOf(app.get("candidateId"))) + "/" + safeSegment(applicationId) + "/offers", id + "-" + safeCloudinaryFilename(original));
       Map<String,Object> offer = new LinkedHashMap<>(); offer.put("id", id); offer.put("applicationId", applicationId); offer.put("candidateId", app.getOrDefault("candidateId", "")); offer.put("candidateEmail", app.get("email")); offer.put("employerEmail", auth.getName()); offer.put("version", version); offer.put("originalFilename", original); offer.put("storageProvider", "CLOUDINARY"); offer.put("cloudinaryPublicId", cloud.get("public_id")); offer.put("cloudinaryResourceType", "raw"); offer.put("cloudinaryDeliveryType", "authenticated"); offer.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); offer.put("salary", Objects.requireNonNullElse(salary, "")); offer.put("joiningDate", Objects.requireNonNullElse(joiningDate, "")); offer.put("notes", Objects.requireNonNullElse(notes, "")); offer.put("status", "PENDING_CANDIDATE_RESPONSE"); offer.put("uploadedAt", LocalDate.now().toString()); store.save("offerLetter", id, offer);
       for (Map<String,Object> old : store.findAll("offerLetter")) if (applicationId.equals(String.valueOf(old.get("applicationId"))) && !id.equals(String.valueOf(old.get("id"))) && "PENDING_CANDIDATE_RESPONSE".equals(String.valueOf(old.get("status")))) { old.put("status", "SUPERSEDED"); store.save("offerLetter", String.valueOf(old.get("id")), old); }
-      app.put("offerStatus", "PENDING_CANDIDATE_RESPONSE"); app.put("latestOfferId", id); store.save("application", applicationId, app);
+      app.put("offerStatus", "PENDING_CANDIDATE_RESPONSE"); app.put("latestOfferId", id);
+      recordStageChange(app, applicationId, "OFFER_SENT", auth.getName(), "Employer uploaded offer letter v" + version);
+      store.save("application", applicationId, app);
       createNotification(String.valueOf(app.get("email")), applicationId, "OFFER_LETTER_UPLOADED", "A new offer letter (version " + version + ") is available for " + app.getOrDefault("jobTitle", "your application") + ". Please review it in Hiring & Offers.");
       ra.addFlashAttribute("success", "Offer letter v" + version + " sent to the candidate.");
     } catch (Exception e) { log.error("Offer-letter upload failed for application {} during Cloudinary upload", applicationId, e); ra.addFlashAttribute("error", "Could not store the offer letter: " + uploadFailureReason(e) + ". Check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in Render; file limit is 8 MB."); }
@@ -153,7 +168,9 @@ public class HiringWorkflowController {
     if ("ACCEPT".equals(decision)) { offer.put("status", "ACCEPTED"); offer.put("respondedAt", LocalDate.now().toString()); offer.put("candidateComments", ""); }
     else if ("REVISE".equals(decision)) { if (comments == null || comments.isBlank()) { ra.addFlashAttribute("error", "Please explain the revision you are requesting."); return "redirect:/candidate/hiring"; } offer.put("status", "REVISION_REQUESTED"); offer.put("respondedAt", LocalDate.now().toString()); offer.put("candidateComments", comments.trim()); }
     else { ra.addFlashAttribute("error", "Choose Accept Offer or Request Revision."); return "redirect:/candidate/hiring"; }
-    store.save("offerLetter", offerId, offer); Map<String,Object> app = application(String.valueOf(offer.get("applicationId"))); app.put("offerStatus", offer.get("status")); store.save("application", String.valueOf(app.get("id")), app);
+    store.save("offerLetter", offerId, offer); Map<String,Object> app = application(String.valueOf(offer.get("applicationId"))); app.put("offerStatus", offer.get("status"));
+    if ("ACCEPT".equals(decision)) recordStageChange(app, String.valueOf(app.get("id")), "OFFER_ACCEPTED", auth.getName(), "Candidate accepted offer v" + offer.getOrDefault("version", "1"));
+    store.save("application", String.valueOf(app.get("id")), app);
     String responseLabel = "ACCEPT".equals(decision) ? "accepted" : "requested a revision to";
     createNotification(String.valueOf(offer.get("employerEmail")), String.valueOf(offer.get("applicationId")), "OFFER_RESPONSE", "The candidate " + responseLabel + " offer letter v" + offer.getOrDefault("version", "1") + " for " + app.getOrDefault("jobTitle", "the role") + ".");
     ra.addFlashAttribute("success", "Your response has been recorded and shared with the employer."); return "redirect:/candidate/hiring";
