@@ -8,6 +8,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.UserDetailsManager;
 import org.springframework.beans.factory.ObjectProvider;
 import in.asmj.recruitment.service.MeetingNotificationService;
+import in.asmj.recruitment.service.RecruitmentNotificationService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -21,9 +22,10 @@ public class RecruitmentController {
   private final UserDetailsManager users;
   private final PasswordEncoder passwordEncoder;
   private final ObjectProvider<MeetingNotificationService> meetingNotifications;
+  private final RecruitmentNotificationService notifications;
 
-  public RecruitmentController(RecordStore store, UserDetailsManager users, PasswordEncoder passwordEncoder, ObjectProvider<MeetingNotificationService> meetingNotifications) {
-    this.store = store; this.users = users; this.passwordEncoder = passwordEncoder; this.meetingNotifications = meetingNotifications;
+  public RecruitmentController(RecordStore store, UserDetailsManager users, PasswordEncoder passwordEncoder, ObjectProvider<MeetingNotificationService> meetingNotifications, RecruitmentNotificationService notifications) {
+    this.store = store; this.users = users; this.passwordEncoder = passwordEncoder; this.meetingNotifications = meetingNotifications; this.notifications = notifications;
   }
 
   @GetMapping("/") public String home(Model m) {
@@ -246,7 +248,12 @@ public class RecruitmentController {
     Map<String,Object> job=store.find("job",id).orElseThrow(); String normalized=normalizedEmail(auth.getName());
     String lookupEmail=normalized; Map<String,Object> candidate=store.findAll("candidate").stream().filter(c->lookupEmail.equalsIgnoreCase(String.valueOf(c.get("email")))).findFirst().orElse(null);
     if(candidate!=null){fullName=String.valueOf(candidate.getOrDefault("fullName",fullName));phone=String.valueOf(candidate.getOrDefault("mobile",candidate.getOrDefault("phone",phone==null?"":phone)));alternateMobile=String.valueOf(candidate.getOrDefault("alternateMobile",alternateMobile==null?"":alternateMobile));}
-    String appId=newId(); Map<String,Object> a=new LinkedHashMap<>(); a.put("id",appId); a.put("jobId",id); a.put("jobTitle",job.get("title")); a.put("company",job.get("company")); a.put("employerId",job.get("employerId")); a.put("employerEmail",job.get("employerEmail")); a.put("recruiterEmail",job.getOrDefault("recruiterEmail","")); a.put("candidateId",candidate==null?"":candidate.get("id")); a.put("fullName",fullName); a.put("email",normalized); a.put("phone",phone); a.put("alternateMobile",alternateMobile); a.put("status","APPLIED"); a.put("appliedAt",LocalDate.now().toString()); store.save("application",appId,a); ra.addFlashAttribute("success","Application submitted. Reference: "+appId); return "redirect:/opportunity/"+id;
+    String appId=newId(); Map<String,Object> a=new LinkedHashMap<>(); a.put("id",appId); a.put("jobId",id); a.put("jobTitle",job.get("title")); a.put("company",job.get("company")); a.put("employerId",job.get("employerId")); a.put("employerEmail",job.get("employerEmail")); a.put("recruiterEmail",job.getOrDefault("recruiterEmail","")); a.put("candidateId",candidate==null?"":candidate.get("id")); a.put("fullName",fullName); a.put("email",normalized); a.put("phone",phone); a.put("alternateMobile",alternateMobile); a.put("status","APPLIED"); a.put("appliedAt",LocalDate.now().toString()); store.save("application",appId,a);
+    String applyMessage = "A new application was received for " + a.getOrDefault("jobTitle", "a job") + ". Candidate: " + fullName + ".";
+    notifications.notifyUser(String.valueOf(a.get("employerEmail")), appId, "NEW_APPLICATION", applyMessage);
+    notifications.notifyUser(String.valueOf(a.getOrDefault("recruiterEmail", "")), appId, "NEW_APPLICATION", applyMessage);
+    notifications.notifyRole("ADMIN", appId, "NEW_APPLICATION", applyMessage);
+    ra.addFlashAttribute("success","Application submitted. Reference: "+appId); return "redirect:/opportunity/"+id;
   }
   @GetMapping("/applications") public String applications(Model m, Authentication auth) {
     List<Map<String,Object>> records = store.findAll("application");
@@ -297,6 +304,7 @@ public class RecruitmentController {
       String notificationId = newId(); Map<String,Object> n = new LinkedHashMap<>(); n.put("id", notificationId); n.put("candidateEmail", a.get("email")); n.put("applicationId", id); n.put("type", "JOINING_DOCUMENTS_REQUIRED"); n.put("message", "Congratulations! You have been marked Hired for " + a.getOrDefault("jobTitle", "the role") + ". Please upload your joining documents."); n.put("createdAt", LocalDate.now().toString()); n.put("read", false); store.save("notification", notificationId, n);
     }
     store.save("application",id,a);
+    if (!status.equals(previous)) notifications.notifyApplicationTeam(a, "APPLICATION_STAGE_CHANGED", "Application for " + a.getOrDefault("jobTitle", "a role") + " moved from " + previous.replace('_',' ') + " to " + status.replace('_',' ') + ".");
     if(Set.of("SELECTED","HIRED","OFFER_SENT","OFFER_ACCEPTED","JOINED").contains(status)) createCommissionIfMissing(a);
     ra.addFlashAttribute("success", "Application stage updated to " + status.replace('_',' ') + ". Status history and candidate notification recorded." + (Set.of("SELECTED","HIRED","OFFER_SENT","OFFER_ACCEPTED","JOINED").contains(status) ? " Commission record created or confirmed." : "")); return "redirect:/applications";
   }

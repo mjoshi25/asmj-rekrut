@@ -50,6 +50,7 @@ public class SecurityConfig {
         .requestMatchers("/admin/**", "/reports/**", "/employers/**", "/placements/**").hasRole("ADMIN")
         .requestMatchers("/candidate/profile/**", "/candidate/profile", "/candidate/hiring/**").hasRole("CANDIDATE")
         .requestMatchers("/candidate/notifications/**").hasRole("CANDIDATE")
+        .requestMatchers("/notifications/**").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER", "CANDIDATE")
         .requestMatchers("/settings/**").authenticated()
         .requestMatchers("/candidate-search").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER")
         .requestMatchers("/candidates/*/resume").hasAnyRole("ADMIN", "EMPLOYER", "RECRUITER", "CANDIDATE")

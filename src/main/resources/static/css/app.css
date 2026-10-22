@@ -150,3 +150,15 @@
 .commission-status-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}
 @media(max-width:900px){.pipeline-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:560px){.pipeline-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.pipeline-stats .stat,.commission-status-stats .stat{padding:12px}.commission-status-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Shared role-aware notification bell and compact preview */
+.topbar .nav-notification-group>summary.nav-notification-link{position:relative;display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 11px;border:1px solid #cfe5dd;border-radius:10px;background:#f2faf7;color:#075e62;font-size:12px;font-weight:750;white-space:nowrap;cursor:pointer;list-style:none}
+.topbar .nav-notification-group>summary.nav-notification-link::-webkit-details-marker{display:none}
+.topbar .nav-notification-group[open]>summary.nav-notification-link{background:#e1f4ee;border-color:#a8d8cb}
+.nav-notification-menu{right:0;left:auto!important;width:310px;max-height:380px;overflow:auto}
+.nav-notification-menu a{display:block;white-space:normal!important;overflow-wrap:anywhere;line-height:1.4}
+.nav-notification-menu .nav-notification-all{font-weight:800;color:#087f8c;border-bottom:1px solid #e5efeb;border-radius:7px}
+.nav-notification-menu .notification-preview-unread{background:#f1faf7;font-weight:700}
+.nav-notification-menu .notification-preview-read{color:#647774}
+.notification-preview-empty{margin:8px;padding:12px;color:#647774;font-size:12px}
+@media(max-width:560px){.topbar .nav-notification-group{width:100%;min-width:0}.topbar .nav-notification-group>summary.nav-notification-link{width:100%;justify-content:space-between;white-space:normal}.nav-notification-menu{position:static!important;width:100%;max-width:none;margin-top:5px}}

@@ -1,6 +1,7 @@
 package in.asmj.recruitment.web;
 
 import in.asmj.recruitment.store.RecordStore;
+import in.asmj.recruitment.service.RecruitmentNotificationService;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import jakarta.servlet.http.HttpServletResponse;
@@ -25,14 +26,15 @@ import java.util.*;
 public class HiringWorkflowController {
   private static final Logger log = LoggerFactory.getLogger(HiringWorkflowController.class);
   private final RecordStore store;
+  private final RecruitmentNotificationService notifications;
   private final Path uploadRoot; // Used only for backwards-compatible downloads of older local files.
   private final String cloudName, cloudKey, cloudSecret;
   public HiringWorkflowController(RecordStore store,
       @Value("${asmj.upload-dir:./data/private-uploads}") String uploadDir,
       @Value("${cloudinary.cloud-name:}") String cloudName,
       @Value("${cloudinary.api-key:}") String cloudKey,
-      @Value("${cloudinary.api-secret:}") String cloudSecret) {
-    this.store = store;
+      @Value("${cloudinary.api-secret:}") String cloudSecret, RecruitmentNotificationService notifications) {
+    this.store = store; this.notifications = notifications;
     String effectiveUploadDir = uploadDir == null || uploadDir.isBlank() ? "./data/private-uploads" : uploadDir.trim();
     this.uploadRoot = Paths.get(effectiveUploadDir).toAbsolutePath().normalize();
     this.cloudName = Objects.requireNonNullElse(cloudName, "").trim();
@@ -110,6 +112,7 @@ public class HiringWorkflowController {
       String id = id(); String original = Paths.get(Objects.requireNonNullElse(file.getOriginalFilename(), "document")).getFileName().toString();
       Map<String,Object> cloud = uploadPrivateFile(file, "asmj-recruitment/candidates/" + safeSegment(String.valueOf(app.get("candidateId"))) + "/" + safeSegment(applicationId) + "/documents", id + "-" + safeCloudinaryFilename(original));
       Map<String,Object> d = new LinkedHashMap<>(); d.put("id", id); d.put("applicationId", applicationId); d.put("candidateId", app.getOrDefault("candidateId", "")); d.put("candidateEmail", auth.getName()); d.put("candidateName", app.get("fullName")); d.put("documentType", safeType); d.put("originalFilename", original); d.put("storageProvider", "CLOUDINARY"); d.put("cloudinaryPublicId", cloud.get("public_id")); d.put("cloudinaryResourceType", "raw"); d.put("cloudinaryDeliveryType", "authenticated"); d.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); d.put("size", file.getSize()); d.put("uploadedAt", LocalDate.now().toString()); d.put("reviewStatus", "PENDING_REVIEW"); store.save("candidateDocument", id, d);
+      notifications.notifyApplicationTeam(app, "JOINING_DOCUMENT_UPLOADED", "Candidate " + app.getOrDefault("fullName", "candidate") + " uploaded a joining document (" + safeType + ") for " + app.getOrDefault("jobTitle", "the role") + ".");
       app.put("documentRequestStatus", "UPLOADED");
       if (Set.of("HIRED", "DOCUMENTS_RECEIVED").contains(String.valueOf(app.get("status")).toUpperCase(Locale.ROOT))) {
         recordStageChange(app, applicationId, "DOCUMENTS_RECEIVED", auth.getName(), "Candidate uploaded joining documents");
@@ -150,6 +153,7 @@ public class HiringWorkflowController {
       String id = id(); String original = Paths.get(Objects.requireNonNullElse(file.getOriginalFilename(), "offer.pdf")).getFileName().toString();
       Map<String,Object> cloud = uploadPrivateFile(file, "asmj-recruitment/candidates/" + safeSegment(String.valueOf(app.get("candidateId"))) + "/" + safeSegment(applicationId) + "/offers", id + "-" + safeCloudinaryFilename(original));
       Map<String,Object> offer = new LinkedHashMap<>(); offer.put("id", id); offer.put("applicationId", applicationId); offer.put("candidateId", app.getOrDefault("candidateId", "")); offer.put("candidateEmail", app.get("email")); offer.put("employerEmail", auth.getName()); offer.put("version", version); offer.put("originalFilename", original); offer.put("storageProvider", "CLOUDINARY"); offer.put("cloudinaryPublicId", cloud.get("public_id")); offer.put("cloudinaryResourceType", "raw"); offer.put("cloudinaryDeliveryType", "authenticated"); offer.put("contentType", Objects.requireNonNullElse(file.getContentType(), "application/octet-stream")); offer.put("salary", Objects.requireNonNullElse(salary, "")); offer.put("joiningDate", Objects.requireNonNullElse(joiningDate, "")); offer.put("notes", Objects.requireNonNullElse(notes, "")); offer.put("status", "PENDING_CANDIDATE_RESPONSE"); offer.put("uploadedAt", LocalDate.now().toString()); store.save("offerLetter", id, offer);
+      notifications.notifyApplicationTeam(app, "OFFER_LETTER_UPLOADED", "An offer letter was uploaded for " + app.getOrDefault("fullName", "the candidate") + " — " + app.getOrDefault("jobTitle", "the role") + ".");
       for (Map<String,Object> old : store.findAll("offerLetter")) if (applicationId.equals(String.valueOf(old.get("applicationId"))) && !id.equals(String.valueOf(old.get("id"))) && "PENDING_CANDIDATE_RESPONSE".equals(String.valueOf(old.get("status")))) { old.put("status", "SUPERSEDED"); store.save("offerLetter", String.valueOf(old.get("id")), old); }
       app.put("offerStatus", "PENDING_CANDIDATE_RESPONSE"); app.put("latestOfferId", id);
       recordStageChange(app, applicationId, "OFFER_SENT", auth.getName(), "Employer uploaded offer letter v" + version);
@@ -173,6 +177,7 @@ public class HiringWorkflowController {
     store.save("application", String.valueOf(app.get("id")), app);
     String responseLabel = "ACCEPT".equals(decision) ? "accepted" : "requested a revision to";
     createNotification(String.valueOf(offer.get("employerEmail")), String.valueOf(offer.get("applicationId")), "OFFER_RESPONSE", "The candidate " + responseLabel + " offer letter v" + offer.getOrDefault("version", "1") + " for " + app.getOrDefault("jobTitle", "the role") + ".");
+    notifications.notifyApplicationTeam(app, "OFFER_RESPONSE", "The candidate " + responseLabel + " the offer for " + app.getOrDefault("jobTitle", "the role") + ".");
     ra.addFlashAttribute("success", "Your response has been recorded and shared with the employer."); return "redirect:/candidate/hiring";
   }
 
@@ -186,6 +191,7 @@ public class HiringWorkflowController {
     d.put("reviewStatus", status); d.put("reviewedBy", auth.getName()); d.put("reviewedAt", LocalDate.now().toString()); store.save("candidateDocument", documentId, d);
     String reviewMessage = "VERIFIED".equals(status) ? "Your " + d.getOrDefault("documentType", "joining document") + " has been verified." : "Please re-upload your " + d.getOrDefault("documentType", "joining document") + " after reviewing the employer feedback.";
     createNotification(String.valueOf(d.get("candidateEmail")), String.valueOf(d.get("applicationId")), "DOCUMENT_REVIEW", reviewMessage);
+    notifications.notifyApplicationTeam(app, "DOCUMENT_REVIEWED", "A joining document for " + app.getOrDefault("fullName", "the candidate") + " was marked " + status.replace("_", " ") + ".");
     ra.addFlashAttribute("success", "Document review saved."); return "redirect:/hiring/applications/" + app.get("id") + "/documents";
   }
 
