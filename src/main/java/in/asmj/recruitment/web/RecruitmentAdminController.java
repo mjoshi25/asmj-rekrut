@@ -16,10 +16,20 @@ public class RecruitmentAdminController {
  @GetMapping("/admin/commission") public String commission(Model m){
    Map<String,Object> cfg=store.find("settings","commission").orElseGet(()->Map.of("type","PERCENT","value","8","currency","INR"));
    List<Map<String,Object>> rows=store.findAll("commission");
+   // Older ledger records may predate payment/model metadata; supply display defaults.
+   for (Map<String,Object> row : rows) {
+     row.putIfAbsent("paymentStatus", "PENDING"); row.putIfAbsent("modelType", "PERCENT");
+     row.putIfAbsent("modelValue", 0); row.putIfAbsent("amount", 0); row.putIfAbsent("salaryBase", 0);
+     row.putIfAbsent("calculationStatus", "NEEDS_SALARY"); row.putIfAbsent("candidateName", "Candidate");
+     row.putIfAbsent("candidateEmail", ""); row.putIfAbsent("company", ""); row.putIfAbsent("recruiterEmail", "");
+     row.putIfAbsent("jobTitle", ""); row.putIfAbsent("id", "");
+   }
    double total=rows.stream().filter(c->!"WAIVED".equalsIgnoreCase(String.valueOf(c.getOrDefault("paymentStatus","PENDING")))).mapToDouble(c->number(c.get("amount"))).sum();
    double paid=rows.stream().filter(c->"PAID".equalsIgnoreCase(String.valueOf(c.get("paymentStatus")))).mapToDouble(c->number(c.get("amount"))).sum();
    double outstanding=rows.stream().filter(c->Set.of("PENDING","INVOICED").contains(String.valueOf(c.getOrDefault("paymentStatus","PENDING")).toUpperCase(Locale.ROOT))).mapToDouble(c->number(c.get("amount"))).sum();
-   m.addAttribute("config",cfg);m.addAttribute("commissions",rows);m.addAttribute("totalCommission",total);m.addAttribute("paidCommission",paid);m.addAttribute("outstandingCommission",outstanding);return "admin-commission";
+   Map<String,Long> statusCounts = new LinkedHashMap<>();
+   for (String status : List.of("PENDING", "INVOICED", "PAID", "WAIVED")) statusCounts.put(status, rows.stream().filter(c -> status.equalsIgnoreCase(String.valueOf(c.getOrDefault("paymentStatus", "PENDING")))).count());
+   m.addAttribute("config",cfg);m.addAttribute("commissions",rows);m.addAttribute("totalCommission",total);m.addAttribute("paidCommission",paid);m.addAttribute("outstandingCommission",outstanding);m.addAttribute("commissionStatuses",statusCounts);return "admin-commission";
  }
  @PostMapping("/admin/commission") public String saveCommission(@RequestParam String type,@RequestParam double value,RedirectAttributes ra){if(!Set.of("PERCENT","FIXED").contains(type)||!Double.isFinite(value)||value<0||("PERCENT".equals(type)&&value>100)||("FIXED".equals(type)&&value>100000000)){ra.addFlashAttribute("error","Enter a valid commission model: percentage must be 0–100%, or fixed INR fee up to ₹10 crore.");return "redirect:/admin/commission";}Map<String,Object> c=new LinkedHashMap<>();c.put("id","commission");c.put("type",type);c.put("value",value);c.put("currency","INR");c.put("updatedAt",LocalDate.now().toString());store.save("settings","commission",c);ra.addFlashAttribute("success","Commission model saved. It applies to future candidate selections; existing ledger entries retain their saved model until recalculated.");return "redirect:/admin/commission";}
  @PostMapping("/admin/commission/{id}/status") public String commissionStatus(@PathVariable String id,@RequestParam String status,org.springframework.security.core.Authentication auth,RedirectAttributes ra){if(!Set.of("PENDING","INVOICED","PAID","WAIVED").contains(status)){ra.addFlashAttribute("error","Invalid commission status.");return "redirect:/admin/commission";}store.find("commission",id).ifPresent(c->{String previous=String.valueOf(c.getOrDefault("paymentStatus","PENDING"));c.put("paymentStatus",status);c.put("updatedAt",LocalDate.now().toString());store.save("commission",id,c);auditCommission(id,"STATUS_CHANGED",previous,status,auth==null?"system":auth.getName(),"Commission status changed");});ra.addFlashAttribute("success","Commission status updated and recorded in the audit trail.");return "redirect:/admin/commission";}

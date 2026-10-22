@@ -141,3 +141,12 @@
 .notification-empty b{font:750 15px Manrope,sans-serif;color:#294b49}
 .notification-empty p{max-width:440px;margin:5px 0 0;font-size:12px}
 @media(max-width:560px){.notification-heading{flex-direction:column;align-items:stretch}.notification-heading form,.notification-read-all{width:100%}.notification-item{gap:9px;padding:12px 10px}.notification-read-button{width:28px;height:28px;flex:0 0 28px}.topbar .nav-notification-link{justify-content:center;white-space:normal;min-width:0}}
+
+/* Hiring pipeline and commission ledger summaries */
+.pipeline-stats{grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:18px 0 24px}
+.pipeline-stats .stat,.commission-status-stats .stat{padding:14px 16px}
+.pipeline-stats .stat>span,.commission-status-stats .stat>span{font-size:11px;overflow-wrap:anywhere}
+.pipeline-stats .stat strong,.commission-status-stats .stat strong{font-size:25px;margin:5px 0 0}
+.commission-status-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}
+@media(max-width:900px){.pipeline-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:560px){.pipeline-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.pipeline-stats .stat,.commission-status-stats .stat{padding:12px}.commission-status-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}

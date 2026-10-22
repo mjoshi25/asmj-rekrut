@@ -255,8 +255,8 @@ public class RecruitmentController {
       else if (hasRole(auth, "ROLE_RECRUITER")) records = records.stream().filter(a -> auth.getName().equalsIgnoreCase(String.valueOf(a.get("recruiterEmail"))) && store.findAll("recruiterAuthorization").stream().anyMatch(x -> auth.getName().equalsIgnoreCase(String.valueOf(x.get("recruiterEmail"))) && String.valueOf(a.get("employerId")).equals(String.valueOf(x.get("employerId"))) && "ACTIVE".equalsIgnoreCase(String.valueOf(x.get("status"))) && Boolean.TRUE.equals(x.get("canManageCandidates")))).toList();
       else records = List.of();
     }
-    // Older application records predate the hiring workflow and do not contain offerStatus.
-    // Populate display defaults before Thymeleaf evaluates applications.html.
+    // Backfill safe view defaults for records created before pipeline fields existed.
+    // Records are maps, so absent keys must be initialized before Thymeleaf property access.
     for (Map<String,Object> record : records) {
       record.putIfAbsent("offerStatus", "");
       record.putIfAbsent("documentRequestStatus", "");
@@ -265,11 +265,23 @@ public class RecruitmentController {
       record.putIfAbsent("fullName", "Candidate");
       record.putIfAbsent("email", "");
       record.putIfAbsent("jobTitle", "");
+      if (!(record.get("statusHistory") instanceof List<?>)) record.put("statusHistory", List.of());
     }
+    // Use one canonical set of stages for pipeline reporting; legacy OFFERED records
+    // are counted with OFFER_SENT without rewriting stored historical records.
+    List<String> pipelineStages = List.of("APPLIED", "SHORTLISTED", "INTERVIEW", "SELECTED", "HIRED", "DOCUMENTS_RECEIVED", "OFFER_SENT", "OFFER_ACCEPTED", "JOINED", "REJECTED");
+    Map<String,Long> stageCounts = new LinkedHashMap<>();
+    for (String stage : pipelineStages) {
+      stageCounts.put(stage, records.stream().filter(r -> stage.equals(String.valueOf(r.getOrDefault("status", "APPLIED"))) || ("OFFER_SENT".equals(stage) && "OFFERED".equals(String.valueOf(r.get("status"))))).count());
+    }
+    m.addAttribute("pipelineStages", pipelineStages);
+    m.addAttribute("stageCounts", stageCounts);
     m.addAttribute("records", records); return "applications";
   }
   @PostMapping("/applications/{id}/status") public String applicationStatus(@PathVariable String id,@RequestParam String status,RedirectAttributes ra) {
-    if(!Set.of("APPLIED","SHORTLISTED","INTERVIEW","OFFERED","SELECTED","HIRED","DOCUMENTS_RECEIVED","OFFER_SENT","OFFER_ACCEPTED","JOINED","REJECTED").contains(status)){ra.addFlashAttribute("error","Invalid application status.");return "redirect:/applications";}
+    // Canonicalize the historical OFFERED alias to the standard OFFER_SENT stage.
+    if ("OFFERED".equalsIgnoreCase(status)) status = "OFFER_SENT";
+    if(!Set.of("APPLIED","SHORTLISTED","INTERVIEW","SELECTED","HIRED","DOCUMENTS_RECEIVED","OFFER_SENT","OFFER_ACCEPTED","JOINED","REJECTED").contains(status)){ra.addFlashAttribute("error","Invalid application status.");return "redirect:/applications";}
     Map<String,Object> a=store.find("application",id).orElseThrow();
     if (!canManageApplication(a, org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication())) { ra.addFlashAttribute("error", "You are not authorized to update this application."); return "redirect:/applications"; }
     String previous = String.valueOf(a.getOrDefault("status", "APPLIED"));
