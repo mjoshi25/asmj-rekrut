@@ -413,6 +413,7 @@ public class RecruitmentController {
       return "redirect:/interviews";
     }
     // A user must not be able to attach an unrelated candidate to another employer's job.
+    List<String> invalidCandidates = new ArrayList<>();
     Set<String> eligibleEmails = store.findAll("application").stream()
         .filter(a -> jobId.equals(String.valueOf(a.get("jobId"))))
         .map(a -> String.valueOf(a.get("email")).trim().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
@@ -437,7 +438,6 @@ public class RecruitmentController {
     String groupId = UUID.randomUUID().toString().replace("-", "");
     int notified = 0;
     int emailSent = 0;
-    List<String> invalidCandidates = new ArrayList<>();
     for (String selectedId : selectedIds) {
       Optional<Map<String,Object>> candidateOpt = store.find("candidate", selectedId);
       if (candidateOpt.isEmpty()) { invalidCandidates.add(selectedId); continue; }
