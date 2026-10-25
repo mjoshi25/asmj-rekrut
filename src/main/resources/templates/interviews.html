@@ -10,7 +10,7 @@
     <h2>Schedule an interview</h2>
     <div class="form-grid">
       <label>Participants (select candidates)<select name="candidateIds" multiple size="4"><option th:each="c : ${candidates}" th:value="${c.id}" th:text="|${c.fullName} — ${c.email}|">Candidate</option></select><small class="muted">Optional if you enter recipient emails below. On mobile, use the email field for easier multi-recipient entry.</small></label>
-      <label>Additional recipient emails<input name="recipientEmails" type="text" placeholder="candidate1@example.com, candidate2@example.com" autocomplete="off"/><small class="muted">Enter one or more emails separated by commas, semicolons, or new lines. Recipients must be candidates who applied for the selected job.</small></label>
+      <label>Additional recipient emails<input name="recipientEmails" type="text" placeholder="candidate1@example.com, candidate2@example.com" autocomplete="off"/><small class="muted">Enter one or more emails separated by commas, semicolons, or new lines. Candidate recipients must have applied for the selected job. Registered employers, admins, and recruiters authorized for this job can also receive in-app notifications.</small></label>
       <label>Job<select name="jobId" required><option value="" disabled selected>Select job opening</option><option th:each="j : ${jobs}" th:value="${j.id}" th:text="|${j.title} — ${j.company}|">Job</option></select></label>
       <label>Interviewer name<input name="interviewer" required placeholder="Name of interviewer"></label>
       <label>Date and time<input type="datetime-local" name="scheduledAt" required></label>

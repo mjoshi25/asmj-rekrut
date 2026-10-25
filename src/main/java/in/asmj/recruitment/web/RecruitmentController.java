@@ -414,6 +414,7 @@ public class RecruitmentController {
     }
     // A user must not be able to attach an unrelated candidate to another employer's job.
     List<String> invalidCandidates = new ArrayList<>();
+    Set<String> internalRecipients = new LinkedHashSet<>();
     Set<String> eligibleEmails = store.findAll("application").stream()
         .filter(a -> jobId.equals(String.valueOf(a.get("jobId"))))
         .map(a -> String.valueOf(a.get("email")).trim().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
@@ -425,7 +426,11 @@ public class RecruitmentController {
         if (!email.matches("^[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}$".toLowerCase(Locale.ROOT))) {
           invalidCandidates.add(email + " (invalid email)"); continue;
         }
-        if (!eligibleEmails.contains(email)) { invalidCandidates.add(email + " (not an applicant for this job)"); continue; }
+        if (!eligibleEmails.contains(email)) {
+          if (isAuthorizedInterviewRecipient(email, job)) internalRecipients.add(email);
+          else invalidCandidates.add(email + " (not an eligible candidate or authorized interview recipient)");
+          continue;
+        }
         store.findAll("candidate").stream().filter(c -> email.equals(String.valueOf(c.getOrDefault("email", "")).trim().toLowerCase(Locale.ROOT)))
             .map(c -> String.valueOf(c.getOrDefault("id", ""))).filter(v -> !v.isBlank()).findFirst().ifPresent(selectedIds::add);
       }
@@ -472,10 +477,60 @@ public class RecruitmentController {
       String msg = "Interview invitation saved for " + notified + " participant(s).";
       if (emailSent > 0) msg += " Email sent to " + emailSent + " participant(s).";
       else msg += " Portal notifications are available; email delivery is not confirmed. Configure SMTP if email notifications are required.";
-      if (!invalidCandidates.isEmpty()) msg += " Skipped " + invalidCandidates.size() + " invalid candidate selection(s).";
+      int internalNotified = 0;
+      for (String recipient : internalRecipients) {
+        // The person scheduling the interview is already aware of the event; avoid self-notifications.
+        if (auth != null && recipient.equalsIgnoreCase(auth.getName())) continue;
+        String notificationId = newId();
+        Map<String,Object> n = new LinkedHashMap<>();
+        n.put("id", notificationId); n.put("recipientEmail", recipient); n.put("candidateEmail", recipient);
+        n.put("groupMeetingId", groupId); n.put("type", "INTERVIEW_SCHEDULED");
+        n.put("message", "Interview scheduled for " + job.getOrDefault("title", "the selected job") + " on " + scheduledAt
+            + ". Interviewer: " + interviewer.trim() + (meetingUrl.isBlank() ? "." : ". Join via " + provider + ": " + meetingUrl));
+        n.put("meetingUrl", meetingUrl); n.put("meetingProvider", provider); n.put("scheduledAt", scheduledAt);
+        n.put("createdAt", java.time.Instant.now().toString()); n.put("read", false);
+        store.save("notification", notificationId, n);
+        internalNotified++;
+        Map<String,Object> invite = new LinkedHashMap<>();
+        invite.put("email", recipient); invite.put("candidateName", recipient); invite.put("jobTitle", job.getOrDefault("title", "Interview"));
+        invite.put("company", job.getOrDefault("company", "")); invite.put("interviewer", interviewer.trim());
+        invite.put("scheduledAt", scheduledAt); invite.put("interviewType", provider); invite.put("meetingProvider", online ? provider : "");
+        invite.put("notes", notes == null ? "" : notes.trim()); invite.put("meetingUrl", meetingUrl);
+        if (meetingNotifications.getIfAvailable() != null && meetingNotifications.getIfAvailable().sendInterviewInvite(invite)) emailSent++;
+      }
+      msg += " Internal employer/recruiter notifications created: " + internalNotified + ".";
+      if (emailSent > 0) msg += " Email sent to " + emailSent + " recipient(s).";
+      if (!invalidCandidates.isEmpty()) msg += " Skipped " + invalidCandidates.size() + " invalid/ineligible recipient(s).";
       ra.addFlashAttribute("success", msg);
     }
     return "redirect:/interviews";
+  }
+
+  private boolean isAuthorizedInterviewRecipient(String email, Map<String,Object> job) {
+    if (email == null || email.isBlank() || job == null) return false;
+    if (email.equalsIgnoreCase(String.valueOf(job.getOrDefault("employerEmail", "")))) return true;
+    for (Map<String,Object> user : store.findAll("authUser")) {
+      Object username = user.getOrDefault("username", user.get("id"));
+      if (username == null || !email.equalsIgnoreCase(String.valueOf(username))) continue;
+      Object raw = user.get("authorities");
+      Set<String> roles = raw instanceof Collection<?> c
+          ? c.stream().map(String::valueOf).collect(java.util.stream.Collectors.toSet())
+          : raw == null ? Set.of() : Arrays.stream(String.valueOf(raw).split(",")).map(String::trim).collect(java.util.stream.Collectors.toSet());
+      if (roles.contains("ROLE_ADMIN")) return true;
+      if (roles.contains("ROLE_RECRUITER")) {
+        String employerId = String.valueOf(job.getOrDefault("employerId", ""));
+        boolean assigned = email.equalsIgnoreCase(String.valueOf(job.getOrDefault("recruiterEmail", "")))
+            || ("RECRUITER".equalsIgnoreCase(String.valueOf(job.getOrDefault("postedByRole", "")))
+                && email.equalsIgnoreCase(String.valueOf(job.getOrDefault("postedBy", ""))));
+        boolean authorized = store.findAll("recruiterAuthorization").stream().anyMatch(a ->
+            email.equalsIgnoreCase(String.valueOf(a.getOrDefault("recruiterEmail", "")))
+                && employerId.equals(String.valueOf(a.getOrDefault("employerId", "")))
+                && "ACTIVE".equalsIgnoreCase(String.valueOf(a.getOrDefault("status", "")))
+                && (Boolean.TRUE.equals(a.get("canManageCandidates")) || Boolean.TRUE.equals(a.get("canPostJobs"))));
+        return assigned && authorized;
+      }
+    }
+    return false;
   }
 
   private boolean validHttpsUrl(String value) {
