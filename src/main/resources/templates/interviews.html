@@ -9,7 +9,8 @@
     <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
     <h2>Schedule an interview</h2>
     <div class="form-grid">
-      <label>Participants<select name="candidateIds" required multiple size="5"><option th:each="c : ${candidates}" th:value="${c.id}" th:text="|${c.fullName} — ${c.email}|">Candidate</option></select><small class="muted">Use Ctrl (Windows) or long-press (mobile, where supported) to select multiple candidates.</small></label>
+      <label>Participants (select candidates)<select name="candidateIds" multiple size="4"><option th:each="c : ${candidates}" th:value="${c.id}" th:text="|${c.fullName} — ${c.email}|">Candidate</option></select><small class="muted">Optional if you enter recipient emails below. On mobile, use the email field for easier multi-recipient entry.</small></label>
+      <label>Additional recipient emails<input name="recipientEmails" type="text" placeholder="candidate1@example.com, candidate2@example.com" autocomplete="off"/><small class="muted">Enter one or more emails separated by commas, semicolons, or new lines. Recipients must be candidates who applied for the selected job.</small></label>
       <label>Job<select name="jobId" required><option value="" disabled selected>Select job opening</option><option th:each="j : ${jobs}" th:value="${j.id}" th:text="|${j.title} — ${j.company}|">Job</option></select></label>
       <label>Interviewer name<input name="interviewer" required placeholder="Name of interviewer"></label>
       <label>Date and time<input type="datetime-local" name="scheduledAt" required></label>
@@ -17,7 +18,7 @@
       <label id="meetingUrlLabel">Meeting link<input name="meetingUrl" id="meetingUrl" type="url" placeholder="Paste the Google Meet or Teams invite link"/></label>
     </div>
     <label>Notes / instructions<textarea name="notes" rows="2" placeholder="Anything the candidate should prepare"></textarea></label>
-    <p class="muted">Create the meeting in Google Meet or Microsoft Teams first, then paste its invite link above. This application sends the link to each selected participant through their portal; email delivery works when SMTP is configured. It does not create meetings inside Google or Microsoft automatically.</p>
+    <p class="muted">For testing, any HTTPS URL is accepted as a placeholder meeting link. Replace it with the real Google Meet or Teams link before the interview. This application sends the link to each selected participant through their portal; email delivery works when SMTP is configured. It does not create meetings inside Google or Microsoft automatically.</p>
     <button class="button">Create meeting & notify candidate →</button>
   </form>
   <section class="panel spaced"><div class="panel-head"><div><h2>Scheduled interviews</h2><p>Meeting details and invite status</p></div></div>
@@ -32,7 +33,7 @@
  const provider=document.getElementById('meetingProvider');
  const input=document.getElementById('meetingUrl');
  const label=document.getElementById('meetingUrlLabel');
- function update(){const online=provider.value==='Google Meet'||provider.value==='Microsoft Teams';label.style.display=online?'grid':'none';input.required=online;input.placeholder=provider.value==='Google Meet'?'https://meet.google.com/...':'https://teams.microsoft.com/...';}
+ function update(){const online=provider.value==='Google Meet'||provider.value==='Microsoft Teams';label.style.display=online?'grid':'none';input.required=online;input.placeholder=provider.value==='Google Meet'?'https://example.com/test-meeting':'https://example.com/test-meeting';}
  provider.addEventListener('change',update);update();
 })();
 </script></body></html>

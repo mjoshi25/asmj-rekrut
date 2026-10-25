@@ -382,6 +382,7 @@ public class RecruitmentController {
   public String saveInterview(
       @RequestParam(value="candidateIds", required=false) List<String> candidateIds,
       @RequestParam(value="candidateId", required=false) String legacyCandidateId,
+      @RequestParam(value="recipientEmails", required=false) String recipientEmails,
       @RequestParam String jobId,
       @RequestParam String interviewer,
       @RequestParam String scheduledAt,
@@ -394,15 +395,15 @@ public class RecruitmentController {
     if (selectedIds.isEmpty() && legacyCandidateId != null && !legacyCandidateId.isBlank()) selectedIds.add(legacyCandidateId);
     selectedIds = selectedIds.stream().filter(Objects::nonNull).map(String::trim).filter(x -> !x.isBlank()).distinct().toList();
     Optional<Map<String,Object>> jobOpt = store.find("job", jobId);
-    if (selectedIds.isEmpty() || jobOpt.isEmpty()) {
-      ra.addFlashAttribute("error", "Select at least one candidate and a valid job opening.");
+    if (jobOpt.isEmpty() || (selectedIds.isEmpty() && (recipientEmails == null || recipientEmails.isBlank()))) {
+      ra.addFlashAttribute("error", "Select a candidate or enter at least one recipient email, and select a valid job opening.");
       return "redirect:/interviews";
     }
     String provider = interviewType == null ? "Google Meet" : interviewType.trim();
     boolean online = "Google Meet".equals(provider) || "Microsoft Teams".equals(provider);
     String meetingUrl = suppliedMeetingUrl == null ? "" : suppliedMeetingUrl.trim();
-    if (online && !validMeetingUrl(provider, meetingUrl)) {
-      ra.addFlashAttribute("error", "Enter a valid HTTPS " + provider + " meeting link before notifying participants.");
+    if (online && !validHttpsUrl(meetingUrl)) {
+      ra.addFlashAttribute("error", "Enter a valid HTTPS meeting URL (a placeholder URL is allowed for testing).");
       return "redirect:/interviews";
     }
     if (!online) meetingUrl = "";
@@ -414,7 +415,25 @@ public class RecruitmentController {
     // A user must not be able to attach an unrelated candidate to another employer's job.
     Set<String> eligibleEmails = store.findAll("application").stream()
         .filter(a -> jobId.equals(String.valueOf(a.get("jobId"))))
-        .map(a -> String.valueOf(a.get("email"))).collect(java.util.stream.Collectors.toSet());
+        .map(a -> String.valueOf(a.get("email")).trim().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
+    if (recipientEmails != null && !recipientEmails.isBlank()) {
+      Set<String> requestedEmails = Arrays.stream(recipientEmails.split("[,;\\r\\n]+"))
+          .map(String::trim).filter(v -> !v.isBlank()).map(v -> v.toLowerCase(Locale.ROOT))
+          .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+      for (String email : requestedEmails) {
+        if (!email.matches("^[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}$".toLowerCase(Locale.ROOT))) {
+          invalidCandidates.add(email + " (invalid email)"); continue;
+        }
+        if (!eligibleEmails.contains(email)) { invalidCandidates.add(email + " (not an applicant for this job)"); continue; }
+        store.findAll("candidate").stream().filter(c -> email.equals(String.valueOf(c.getOrDefault("email", "")).trim().toLowerCase(Locale.ROOT)))
+            .map(c -> String.valueOf(c.getOrDefault("id", ""))).filter(v -> !v.isBlank()).findFirst().ifPresent(selectedIds::add);
+      }
+    }
+    selectedIds = new ArrayList<>(selectedIds.stream().distinct().toList());
+    if (selectedIds.isEmpty()) {
+      ra.addFlashAttribute("error", "No eligible candidates selected. Recipients must be registered candidates who applied for this job.");
+      return "redirect:/interviews";
+    }
     String groupId = UUID.randomUUID().toString().replace("-", "");
     int notified = 0;
     int emailSent = 0;
@@ -424,7 +443,7 @@ public class RecruitmentController {
       if (candidateOpt.isEmpty()) { invalidCandidates.add(selectedId); continue; }
       Map<String,Object> candidate = candidateOpt.get();
       String email = String.valueOf(candidate.getOrDefault("email", "")).trim();
-      if (email.isBlank() || !email.contains("@") || !eligibleEmails.contains(email)) {
+      if (email.isBlank() || !email.contains("@") || !eligibleEmails.contains(email.toLowerCase(Locale.ROOT))) {
         invalidCandidates.add(String.valueOf(candidate.getOrDefault("fullName", selectedId)));
         continue;
       }
@@ -459,14 +478,11 @@ public class RecruitmentController {
     return "redirect:/interviews";
   }
 
-  private boolean validMeetingUrl(String provider, String value) {
+  private boolean validHttpsUrl(String value) {
     try {
       java.net.URI uri = java.net.URI.create(value);
-      if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) return false;
-      String host = uri.getHost().toLowerCase(Locale.ROOT);
-      if ("Google Meet".equals(provider)) return host.equals("meet.google.com");
-      if ("Microsoft Teams".equals(provider)) return host.equals("teams.microsoft.com") || host.equals("teams.live.com");
-      return false;
+      return "https".equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null
+          && uri.getUserInfo() == null;
     } catch (Exception ex) { return false; }
   }
   @GetMapping("/placements") public String placements(Model m) {
